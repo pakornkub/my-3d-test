@@ -1,10 +1,11 @@
 # UBE Office
 
-An interactive isometric office in the browser. Click the floor and the chibi engineer walks
-there, routing around the desks; click a chair and he walks over, turns, and sits down.
+An interactive isometric office in the browser. Pick someone from the crew, click the floor
+and they walk there routing around the desks, or click a chair and they walk over, turn, and
+sit down.
 
-The room is modelled procedurally in Blender, the character comes from a generative 3D tool
-and is rigged by script, and everything is served to three.js straight out of the export
+The room is modelled procedurally in Blender, the characters come from a generative 3D tool
+and are rigged by script, and everything is served to three.js straight out of the export
 folder — no asset copying, no manual placement.
 
 ![The app running: isometric office, character mid-walk, object card open](docs/img/ui.png)
@@ -19,11 +20,19 @@ publishes the site to the `gh-pages` branch ([workflow](.github/workflows/deploy
 
 | | |
 | --- | --- |
-| **Click the floor** | A\* path around the furniture, then walk |
-| **Click any of 13 chairs** | Walk to the approach spot, turn to the seat angle, sit |
+| **Pick someone** | Click them, or press `1`–`5`. A ring marks who has the floor; `Esc` clears it |
+| **Click the floor** | A\* path around the furniture, then walk. With nobody picked, the nearest free person goes |
+| **Click any of 13 chairs** | Walk to the approach spot, turn to the seat angle, sit. A chair someone already claimed is refused |
 | **Click an object** | A card opens with its name and a list of suggested actions |
 | **Drag / scroll** | Orbit and zoom |
 | **Iso / Free** | Orthographic preset that matches the Blender render, or free perspective |
+
+![The three generated characters standing together](docs/img/cast.png)
+
+Three models exist so far — a male engineer, a female engineer and the manager, each
+generated separately and put through the same pipeline. The roster lists five; the two
+without a model yet borrow one and are tinted, and stop being placeholders the moment a real
+model lands in `blender/source/`.
 
 <table>
 <tr>
@@ -71,16 +80,17 @@ blender/iso_office_lib.py ───────────► export/ube_office
                                        export/seats.json  (16 seats)
                                        export/obstacles.json  (58 boxes)
                                                │
-blender/source/eng_m1_meshy.blend              │
+blender/source/*_meshy.blend                   │
         │  normalize_character.py              │
-        │    scale to 1.38 m, origin to the    │
-        │    floor, rotate to face -Z          │
+        │    scale to the roster height,       │
+        │    origin to the floor, face -Z      │
         ▼                                      │
         │  rig_character.py                    │
-        │    17-bone biped, skin weights,      │
-        │    Idle / Walk / Sit / SitIdle       │
+        │    17-bone biped scaled to fit,      │
+        │    skin weights, four clips,         │
+        │    textures trimmed for the web      │
         ▼                                      ▼
-export/characters/eng_m1.glb ────────► src/*.js  →  browser
+export/characters/*.glb ─────────────► src/*.js  →  browser
 ```
 
 The office was never authored by hand: `iso_office_lib.py` lays it out from
@@ -93,9 +103,9 @@ all; it reads those files.
 
 ### The character had no skeleton
 
-The generated model could stand, and nothing else. `rig_character.py` builds a 17-bone
-armature sized to the 1.38 m chibi, binds it (validated, with a rigid per-region fallback if
-the automatic weights misbehave), authors the four clips, and writes verification renders
+A generated model can stand, and nothing else. `rig_character.py` builds a 17-bone armature,
+scales it to that character's height, binds it (validated, with a rigid per-region fallback
+if the automatic weights misbehave), authors the four clips, and writes verification renders
 before anything reaches the browser.
 
 <table>
@@ -109,10 +119,10 @@ before anything reaches the browser.
 </tr>
 </table>
 
-**One sit clip, sixteen seats.** The clip ends with the hips at a documented height above the
-origin, and the runtime places the root at `seat.y − sit_hip_y`. That works because a 1.38 m
-chibi's legs are shorter than every chair in the room — the feet dangle, so the ±5 cm
-difference between the sofa and the manager's chair is invisible.
+**One sit clip, sixteen seats, any height.** The clip ends with the hips at a height recorded
+per character in `characters.json`, and the runtime places the root at `seat.y − sit_hip_y`.
+That works because a chibi's legs are shorter than every chair in the room — the feet dangle,
+so the few centimetres between the sofa and the manager's chair never show.
 
 ## Stack
 
@@ -121,17 +131,18 @@ ship inside three; the pathfinder is about 80 lines rather than a dependency.
 
 ```
 src/
-  main.js         wiring, picking, actions
+  main.js         wiring, picking, actions, the crew roster
   scene.js        renderer, lights, the two cameras
   characters.js   asset loading, spawning, clip playback
-  character.js    walk / turn / sit state machine
+  character.js    walk / turn / sit state machine, one per person
+  crew.js         selection, seat claims, keeping bodies apart
   nav.js          occupancy grid, A*, path smoothing, approach repair
   hotspots.js     object name -> label, category, suggested actions
-  ui.js           HUD, object card, toast
+  ui.js           HUD, object card, toast, roster
 ```
 
 `window.__ube` exposes the scene for poking at from the console:
-`__ube.controller.walkTo(5, -2)`, `__ube.step(60)`, `__ube.screenOf('ManagerChair')`.
+`__ube.crew.sendTo(5, -2)`, `__ube.step(60)`, `__ube.screenOf('ManagerChair')`.
 
 ## Things worth knowing
 
@@ -141,10 +152,13 @@ src/
   `NavGrid.repairApproaches()` re-derives them at load and logs what it changed.
 - **glTF node names are not Blender node names.** `GLTFLoader` strips dots, so `Picture.001`
   arrives as `Picture001`. `src/hotspots.js` uses the loaded spelling.
-- **11 MB of assets** on first load. Most of it is three 2048² textures on the character where
-  the scene only ever samples base colour.
-- **One character so far.** The roster has five; the app spawns from the manifest, so the rest
-  appear as soon as they are generated and run through the two Blender scripts.
+- **Textures are trimmed at export.** The office has none at all, so `rig_character.py` drops
+  the normal and roughness maps Meshy ships and halves the base colour: 5.6 MB -> 2.2 MB per
+  character, with no change to geometry or colour. What is left is almost all mesh.
+- **Three characters so far** out of a roster of five. The app spawns from the manifest, so
+  the rest appear as soon as they are generated and run through the two Blender scripts.
+- **Bodies do not path around each other.** The A* grid is static; a separation pass pushes
+  overlapping people apart after they move, which is enough at five bodies in one room.
 
 Pipeline details, the seat-height contract and how to add the rest of the cast are in
 [CHARACTERS.md](CHARACTERS.md).

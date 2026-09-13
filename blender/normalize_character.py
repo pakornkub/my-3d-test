@@ -52,10 +52,12 @@ BLEND   = os.path.join(HERE, "scenes", "ube_characters.blend")
 ROSTER = {
     "eng_m1":  dict(label="Male Engineer 1",   height=1.38, yaw=180.0, stand_at="ChairA1",
                     src="source/eng_m1_meshy.blend", restyle=False),
-    "eng_m2":  dict(label="Male Engineer 2",   height=1.36, yaw=0.0, stand_at="ChairB2"),
-    "eng_f1":  dict(label="Female Engineer 1", height=1.31, yaw=0.0, stand_at="ChairA4"),
+    "eng_m2":  dict(label="Male Engineer 2",   height=1.36, yaw=180.0, stand_at="ChairB2"),
+    "eng_f1":  dict(label="Female Engineer 1", height=1.31, yaw=180.0, stand_at="ChairA4",
+                    src="source/eng_f1_meshy.blend", restyle=False),
     "eng_f2":  dict(label="Female Engineer 2", height=1.30, yaw=0.0, stand_at="ChairB4"),
-    "manager": dict(label="Manager",           height=1.35, yaw=0.0, stand_at="ManagerChair"),
+    "manager": dict(label="Manager",           height=1.40, yaw=180.0, stand_at="ManagerChair",
+                    src="source/manager_meshy.blend", restyle=False),
 }
 
 # ============================ chibi safety net ============================

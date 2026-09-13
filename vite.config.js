@@ -7,8 +7,8 @@ const base = process.env.GITHUB_ACTIONS ? '/my-3d-test/' : '/';
 
 // The Blender pipeline already writes everything the runtime needs into export/, so that
 // folder IS the static root: /ube_office.glb, /seats.json, /obstacles.json,
-// /characters/characters.json, /characters/eng_m1.glb. Nothing is copied or duplicated.
-// Source lives in src/ precisely because publicDir is served verbatim.
+// /characters/*. Nothing is copied or duplicated. Source lives in src/ precisely because
+// publicDir is served verbatim.
 export default defineConfig({
   base,
   publicDir: 'export',

@@ -1,7 +1,17 @@
 // ui.js -- the HTML overlay: camera toolbar, object card, toast, loading veil.
 // Everything is plain DOM; the 3D layer talks to it through this one object.
 
-export function createUI({ onCamera, onReset, onAction }) {
+const STATE_TEXT = {
+  idle: 'ว่าง',
+  turn: 'กำลังหัน',
+  walk: 'กำลังเดิน',
+  faceSeat: 'กำลังหัน',
+  sitDown: 'กำลังนั่ง',
+  seated: 'นั่งอยู่',
+  standUp: 'กำลังลุก',
+};
+
+export function createUI({ onCamera, onReset, onAction, onSelect }) {
   const card = document.getElementById('card');
   const cardCat = card.querySelector('.cat');
   const cardTitle = card.querySelector('h2');
@@ -47,6 +57,34 @@ export function createUI({ onCamera, onReset, onAction }) {
 
   function progress(text) { loadingText.textContent = text; }
 
+  const roster = document.getElementById('roster');
+  let rosterButtons = [];
+
+  /** Rebuilt on every state change, so it doubles as the crew's status readout. */
+  function renderRoster(members, selected) {
+    if (rosterButtons.length !== members.length) {
+      rosterButtons = members.map((m, i) => {
+        const b = document.createElement('button');
+        b.className = 'person';
+        b.innerHTML = `<span class="key">${i + 1}</span>`
+          + `<span class="who"><b></b><em></em></span>`;
+        b.addEventListener('click', () => onSelect(i));
+        return b;
+      });
+      roster.replaceChildren(...rosterButtons);
+    }
+    members.forEach((m, i) => {
+      const b = rosterButtons[i];
+      b.classList.toggle('on', m === selected);
+      b.classList.toggle('ghost', !!m.placeholder);
+      b.querySelector('b').textContent = m.label;
+      const seat = m.ctl.seat?.name;
+      b.querySelector('em').textContent =
+        (STATE_TEXT[m.ctl.state] ?? m.ctl.state) + (seat && m.ctl.seated ? ' · ' + seat : '');
+      b.title = m.placeholder ? m.label + ' — ยังไม่มีโมเดลจริง ใช้ตัวแทนไปก่อน' : m.label;
+    });
+  }
+
   function ready() {
     loading.classList.add('done');
     setTimeout(() => { loading.style.display = 'none'; }, 450);
@@ -60,5 +98,5 @@ export function createUI({ onCamera, onReset, onAction }) {
     loadingText.style.color = '#b4232a';
   }
 
-  return { showCard, hideCard, say, progress, ready, failed };
+  return { showCard, hideCard, say, progress, ready, failed, renderRoster };
 }

@@ -47,6 +47,70 @@
    ],
    "sit_hip_y": 0.46,
    "tris": 59264
+  },
+  "manager": {
+   "file": "manager.glb",
+   "label": "Manager",
+   "height_m": 1.4,
+   "rigged": true,
+   "bones": [
+    "Root",
+    "Hips",
+    "Spine",
+    "Head",
+    "UpperArm.L",
+    "LowerArm.L",
+    "Hand.L",
+    "UpperArm.R",
+    "LowerArm.R",
+    "Hand.R",
+    "UpperLeg.L",
+    "LowerLeg.L",
+    "Foot.L",
+    "UpperLeg.R",
+    "LowerLeg.R",
+    "Foot.R"
+   ],
+   "animations": [
+    "Idle",
+    "Walk",
+    "Sit",
+    "SitIdle"
+   ],
+   "sit_hip_y": 0.4667,
+   "tris": 94340
+  },
+  "eng_f1": {
+   "file": "eng_f1.glb",
+   "label": "Female Engineer 1",
+   "height_m": 1.31,
+   "rigged": true,
+   "bones": [
+    "Root",
+    "Hips",
+    "Spine",
+    "Head",
+    "UpperArm.L",
+    "LowerArm.L",
+    "Hand.L",
+    "UpperArm.R",
+    "LowerArm.R",
+    "Hand.R",
+    "UpperLeg.L",
+    "LowerLeg.L",
+    "Foot.L",
+    "UpperLeg.R",
+    "LowerLeg.R",
+    "Foot.R"
+   ],
+   "animations": [
+    "Idle",
+    "Walk",
+    "Sit",
+    "SitIdle"
+   ],
+   "sit_hip_y": 0.4367,
+   "tris": 72170
   }
  }
 }

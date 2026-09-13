@@ -24,7 +24,8 @@ import normalize_character as T   # reuse clear_scene / import_any / normalize /
 
 R = math.radians
 OUT_DIR = T.OUT_DIR
-SIT_HIP_Y = 0.46                  # hip height at the end of the Sit clip, metres
+REF_HEIGHT = 1.38                 # the height BONES below were measured on
+SIT_HIP_Y  = 0.46                 # hip height at the end of the Sit clip, metres
 
 # ============================ skeleton ============================
 # head -> tail, in the normalised model's space: feet on z=0, hips 0.50, shoulders 0.80,
@@ -51,7 +52,7 @@ BONES = [
 LEG_BONES  = {"UpperLeg.L", "LowerLeg.L", "Foot.L", "UpperLeg.R", "LowerLeg.R", "Foot.R"}
 HAND_BONES = {"Hand.L", "Hand.R"}
 
-def build_armature(name="rig"):
+def build_armature(name="rig", scale=1.0):
     arm_data = bpy.data.armatures.new(name)
     arm = bpy.data.objects.new(name, arm_data)
     bpy.context.collection.objects.link(arm)
@@ -60,7 +61,7 @@ def build_armature(name="rig"):
     eb = arm_data.edit_bones
     for bname, head, tail, parent, connect in BONES:
         b = eb.new(bname)
-        b.head, b.tail = Vector(head), Vector(tail)
+        b.head, b.tail = Vector(head) * scale, Vector(tail) * scale
         if parent:
             b.parent = eb[parent]
             b.use_connect = connect
@@ -70,24 +71,24 @@ def build_armature(name="rig"):
     return arm
 
 # ============================ binding ============================
-def bind(mesh, arm):
+def bind(mesh, arm, scale=1.0):
     """Heat-map weights, then prove the bind is sane before trusting it."""
     T.select([mesh, arm], arm)
     bpy.ops.object.parent_set(type="ARMATURE_AUTO")
-    problems = check_weights(mesh)
+    problems = check_weights(mesh, True, scale)
     if problems:
         for p in problems:
             T.log("  bind warning:", p)
         T.log("  falling back to rigid per-region weights")
-        rigid_weights(mesh, arm)
-        problems = check_weights(mesh, strict=False)
+        rigid_weights(mesh, arm, scale)
+        problems = check_weights(mesh, False, scale)
         for p in problems:
             T.log("  still odd after fallback:", p)
     else:
         T.log("  automatic weights look clean")
     return mesh
 
-def check_weights(mesh, strict=True):
+def check_weights(mesh, strict=True, scale=1.0):
     """Catch the two ways a chibi bind goes wrong: legs grabbing the head, hands grabbing
     the torso. Both show up as weight far from where the bone actually is."""
     byindex = {g.index: g.name for g in mesh.vertex_groups}
@@ -103,9 +104,9 @@ def check_weights(mesh, strict=True):
             gname = byindex.get(g.group)
             if gname is None or g.weight < 0.2:
                 continue
-            if gname in LEG_BONES and v.co.z > 0.86:
+            if gname in LEG_BONES and v.co.z > 0.86 * scale:
                 leg_on_head += 1
-            if gname in HAND_BONES and abs(v.co.x) < 0.12:
+            if gname in HAND_BONES and abs(v.co.x) < 0.12 * scale:
                 hand_on_torso += 1
     T.log("  weights: %d groups, lowest vertex total %.3f" % (len(mesh.vertex_groups), lowest))
     if leg_on_head:
@@ -116,7 +117,7 @@ def check_weights(mesh, strict=True):
         bad.append("%d verts are unbound" % unweighted)
     return bad
 
-def rigid_weights(mesh, arm):
+def rigid_weights(mesh, arm, scale=1.0):
     """One bone per region, weight 1.0. Ugly at the joints but never catastrophic."""
     for g in list(mesh.vertex_groups):
         mesh.vertex_groups.remove(g)
@@ -124,6 +125,7 @@ def rigid_weights(mesh, arm):
 
     def region(co):
         x, y, z = co
+        z /= scale; x /= scale
         if z > 0.845:
             return "Head"
         if z < 0.50:                                   # below the belt: legs, unless it is a hand
@@ -204,7 +206,7 @@ SIT_IDLE = {
     60: dict(SEATED),
 }
 
-def apply_pose(arm, pose):
+def apply_pose(arm, pose, scale=1.0):
     for pb in arm.pose.bones:
         pb.rotation_euler = (0, 0, 0)
         pb.location = (0, 0, 0)
@@ -212,11 +214,11 @@ def apply_pose(arm, pose):
         if key.endswith("@loc"):
             bone = key.split("@")[0]
             if bone in arm.pose.bones:
-                arm.pose.bones[bone].location = Vector(val)
+                arm.pose.bones[bone].location = Vector(val) * scale
         elif key in arm.pose.bones:
             arm.pose.bones[key].rotation_euler = tuple(R(a) for a in val)
 
-def make_action(arm, name, frames):
+def make_action(arm, name, frames, scale=1.0):
     act = bpy.data.actions.new(name)
     act.use_fake_user = True
     if arm.animation_data is None:
@@ -224,7 +226,7 @@ def make_action(arm, name, frames):
     arm.animation_data.action = act
     for f in sorted(frames):
         bpy.context.scene.frame_set(f)
-        apply_pose(arm, frames[f])
+        apply_pose(arm, frames[f], scale)
         for pb in arm.pose.bones:
             pb.keyframe_insert(data_path="rotation_euler", frame=f)
             pb.keyframe_insert(data_path="location", frame=f)
@@ -233,18 +235,64 @@ def make_action(arm, name, frames):
     T.log("  clip %-8s frames %d-%d" % (name, min(frames), max(frames)))
     return act
 
-def author_clips(arm):
-    acts = [make_action(arm, "Idle", IDLE),
-            make_action(arm, "Walk", WALK),
-            make_action(arm, "Sit", SIT),
-            make_action(arm, "SitIdle", SIT_IDLE)]
+def author_clips(arm, scale=1.0):
+    acts = [make_action(arm, "Idle", IDLE, scale),
+            make_action(arm, "Walk", WALK, scale),
+            make_action(arm, "Sit", SIT, scale),
+            make_action(arm, "SitIdle", SIT_IDLE, scale)]
     arm.animation_data.action = acts[0]
     bpy.context.scene.frame_set(1)
-    apply_pose(arm, A_POSE)
+    apply_pose(arm, A_POSE, scale)
     return [a.name for a in acts]
 
+# ============================ trim for the web ============================
+# Meshy ships base colour + normal + roughness at 2048 each. The office it has to stand in
+# has no textures at all and is lit by two lights, so the normal and roughness maps are paid
+# for and never seen. Dropping them and halving the base colour takes a character from
+# ~5.6 MB to well under 1 MB without touching geometry, UVs or colour.
+WEB = dict(max_texture=1024, drop_maps=True, roughness=0.62)
+
+def slim_for_web(objs, cfg=WEB):
+    mats = {s.material for o in objs if o.type == "MESH" for s in o.material_slots if s.material}
+    kept = dropped = 0
+    before = after = 0
+    for m in mats:
+        if not m.use_nodes:
+            continue
+        nt = m.node_tree
+        bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not bsdf:
+            continue
+        base_tex = T._find_image_node(nt, bsdf.inputs["Base Color"])
+        if cfg["drop_maps"]:
+            for k in ("Normal", "Roughness", "Metallic", "Specular IOR Level", "Coat Weight"):
+                if k in bsdf.inputs:
+                    for l in list(bsdf.inputs[k].links):
+                        nt.links.remove(l)
+            bsdf.inputs["Roughness"].default_value = cfg["roughness"]
+            bsdf.inputs["Metallic"].default_value = 0.0
+        # anything no longer feeding the shader would still be packed into the GLB
+        for n in list(nt.nodes):
+            if n.type == "TEX_IMAGE" and n is not base_tex and not n.outputs[0].links:
+                if n.image:
+                    before += n.image.size[0] * n.image.size[1]
+                nt.nodes.remove(n)
+                dropped += 1
+        if base_tex and base_tex.image:
+            img = base_tex.image
+            w, h = img.size
+            before += w * h
+            mx = cfg["max_texture"]
+            if max(w, h) > mx:
+                s = mx / max(w, h)
+                img.scale(max(1, int(w * s)), max(1, int(h * s)))
+            after += img.size[0] * img.size[1]
+            kept += 1
+    T.log("  web: kept %d texture(s), dropped %d -- %.1f -> %.1f megapixels"
+          % (kept, dropped, before / 1e6, after / 1e6))
+
 # ============================ export ============================
-def export(cid, mesh, arm, clips):
+def export(cid, mesh, arm, clips, scale=1.0):
     os.makedirs(OUT_DIR, exist_ok=True)
     T.select([mesh, arm], arm)
     path = os.path.join(OUT_DIR, cid + ".glb")
@@ -261,7 +309,7 @@ def export(cid, mesh, arm, clips):
             "rigged": True,
             "bones": [b[0] for b in BONES],
             "animations": clips,
-            "sit_hip_y": SIT_HIP_Y,
+            "sit_hip_y": round(SIT_HIP_Y * scale, 4),
             "tris": len(mesh.data.loop_triangles)}
     mpath = os.path.join(OUT_DIR, "characters.json")
     doc = {"meta": {}, "characters": {}}
@@ -275,14 +323,19 @@ def export(cid, mesh, arm, clips):
         "sit_note": "the Sit clip ends with the hips at sit_hip_y above the origin; "
                     "put the root at (seat.y - sit_hip_y) so one clip fits every seat",
     })
-    doc.setdefault("characters", {})[cid] = info
+    chars = doc.setdefault('characters', {})
+    chars[cid] = info
+    # drop entries whose GLB is gone -- ids get reassigned as real models arrive
+    for k in [k for k, v in chars.items() if not os.path.exists(os.path.join(OUT_DIR, v.get('file', '')))]:
+        del chars[k]
+        T.log('  manifest: dropped %s (no glb)' % k)
     with open(mpath, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=1)
     T.log("  exported", path, "(%.2f MB)" % (os.path.getsize(path) / 1048576))
     return info
 
 # ============================ verification sheet ============================
-def rig_check(arm, clips, out, samples=64):
+def rig_check(arm, clips, out, samples=64, cid="char"):
     """One frame from each clip. The character faces +Y, and normalize_character.ortho_cam puts the
     camera at -cos(yaw) on Y -- so yaw 180 is the FRONT view, not yaw 0."""
     T.studio(res=(460, 660), samples=samples, focus=(0, 0, 0.72))
@@ -297,7 +350,7 @@ def rig_check(arm, clips, out, samples=64):
             bpy.context.scene.frame_set(frame)
             bpy.context.view_layer.update()
         T.ortho_cam((0, 0, 0.70), 6.0, yaw, 6, 1.75)
-        p = os.path.join(T.RENDERS, "rig_%s.png" % tag)
+        p = os.path.join(T.RENDERS, "rig_%s_%s.png" % (cid, tag))
         bpy.context.scene.render.resolution_x = 460
         bpy.context.scene.render.resolution_y = 660
         T.render_to(p, samples)
@@ -311,6 +364,10 @@ def main():
     ap.add_argument("--id", default="eng_m1")
     ap.add_argument("--samples", type=int, default=64)
     ap.add_argument("--no-render", action="store_true")
+    ap.add_argument("--tex", type=int, default=WEB["max_texture"],
+                    help="longest edge of the base colour texture, px (default 1024)")
+    ap.add_argument("--keep-maps", action="store_true",
+                    help="keep the normal / roughness maps the office never samples")
     a = ap.parse_args(argv)
 
     cid = a.id
@@ -327,14 +384,16 @@ def main():
     root, objs, s = T.normalize(objs, spec["height"], spec["yaw"], cid)
     mesh = next(o for o in objs if o.type == "MESH")
 
-    arm = build_armature(cid + "_rig")
-    bind(mesh, arm)
-    clips = author_clips(arm)
-    info = export(cid, mesh, arm, clips)
+    slim_for_web(objs, dict(WEB, max_texture=a.tex, drop_maps=not a.keep_maps))
+    scale = spec["height"] / REF_HEIGHT
+    arm = build_armature(cid + "_rig", scale)
+    bind(mesh, arm, scale)
+    clips = author_clips(arm, scale)
+    info = export(cid, mesh, arm, clips, scale)
     bpy.ops.wm.save_as_mainfile(filepath=T.BLEND)
     T.log("  saved", T.BLEND)
     if not a.no_render:
-        rig_check(arm, clips, T.RENDERS, a.samples)
+        rig_check(arm, clips, T.RENDERS, a.samples, cid)
     T.log("done:", info["tris"], "tris,", len(clips), "clips")
 
 if __name__ == "__main__":
