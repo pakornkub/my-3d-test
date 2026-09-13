@@ -9,8 +9,9 @@ folder — no asset copying, no manual placement.
 
 ![The app running: isometric office, character mid-walk, object card open](docs/img/ui.png)
 
-**[▶ Live demo](https://pakornkub.github.io/my-3d-test/)** · built and deployed from `main` by
-[GitHub Actions](.github/workflows/deploy.yml)
+**[▶ Live demo](https://pakornkub.github.io/my-3d-test/)** · every push to `main` rebuilds and
+publishes the site to the `gh-pages` branch ([workflow](.github/workflows/deploy.yml)), and
+`npm run deploy` does the same from a laptop.
 
 ---
 
@@ -48,6 +49,20 @@ npm run dev
 
 Requires Node 20+. Nothing else to configure — `vite.config.js` points `publicDir` at
 `export/`, which is exactly where the Blender pipeline writes.
+
+### Deploying
+
+```bash
+npm run deploy      # build, then force-push dist/ to the gh-pages branch
+```
+
+Publishing is a plain branch push rather than a call to the Pages REST API, because the
+Actions `GITHUB_TOKEN` on this repo is not allowed to create or update a Pages site
+(`Resource not accessible by integration`). A branch push only needs `contents: write`, so
+the same script works from CI and from a laptop.
+
+**One-time setup:** *Settings → Pages → Build and deployment → Deploy from a branch →
+`gh-pages` / `(root)`*. Until that is set, the branch is published but nothing serves it.
 
 ## How it is built
 

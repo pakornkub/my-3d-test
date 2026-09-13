@@ -5,18 +5,18 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# One deploy at a time; let a running one finish rather than cancelling it mid-upload.
 concurrency:
   group: pages
   cancel-in-progress: false
 
+# Only contents:write -- publishing is a branch push, not a Pages API call. The Pages
+# deploy actions need a pages:write token this repo does not grant, which is why this
+# workflow writes the built site to the gh-pages branch instead.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,24 +29,6 @@ jobs:
       - run: npm ci
 
       # vite.config.js reads GITHUB_ACTIONS to switch base to /my-3d-test/
-      - run: npm run build
-
-      # enablement turns Pages on for the repo if it has never been configured,
-      # so no manual trip to Settings -> Pages is needed
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - run: node scripts/publish.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
