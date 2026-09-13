@@ -110,12 +110,12 @@ before anything reaches the browser.
 
 <table>
 <tr>
-<td width="50%"><img src="renders/rig_walk.png" alt="Walk clip, frame 4" /></td>
-<td width="50%"><img src="renders/rig_sit_side.png" alt="Sit clip, final frame, side view" /></td>
+<td width="50%"><img src="renders/rig_eng_m1_walk.png" alt="Walk clip, frame 4" /></td>
+<td width="50%"><img src="renders/rig_manager_sit_side.png" alt="Sit clip, final frame, side view" /></td>
 </tr>
 <tr>
 <td align="center"><em><code>Walk</code>, frame 4</em></td>
-<td align="center"><em><code>Sit</code>, final frame</em></td>
+<td align="center"><em><code>Sit</code>, final frame — the manager on a 0.55 m chair</em></td>
 </tr>
 </table>
 

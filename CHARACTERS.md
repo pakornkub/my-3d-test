@@ -8,12 +8,12 @@ walks over and sits down.
 blender/iso_office_lib.py ───────────► export/ube_office.glb
                                        export/seats.json + obstacles.json
                                                │
-blender/source/eng_m1_meshy.blend              │
+blender/source/*_meshy.blend                   │
         │  normalize_character.py (scale / origin / facing)
         ▼                                      │
         │  rig_character.py (armature + Idle/Walk/Sit/SitIdle)
         ▼                                      ▼
-export/characters/eng_m1.glb ────────► src/*.js  →  browser
+export/characters/*.glb ─────────────► src/*.js  →  browser
 ```
 
 ## Where things live
@@ -99,7 +99,7 @@ re-normalises from the source file internally.
 
 | Problem | Fix |
 | --- | --- |
-| model normalised into a unit box | scaled to the `ROSTER` height (1.38 m) |
+| model normalised into a unit box | scaled to the `ROSTER` height (1.31–1.40 m) |
 | origin floating mid-body | moved to the floor, centred between the feet |
 | arbitrary facing | rotated by `yaw` so it faces `+Y` in Blender = `-Z` in three.js |
 | photographic PBR texture | posterised — **off for this model** (`restyle=False`) |
@@ -109,17 +109,22 @@ Sources come from `blender/raw/<id>.glb` (or `.blend`) by default; the `src=` fi
 `blender/source/eng_m1_meshy.blend`. `--chibi 1.45` force-scales the head bone if a generator
 under-delivers on proportions.
 
-`rig_character.py` adds a 17-bone biped, binds it with automatic weights (validated, with a
-rigid per-region fallback), and authors `Idle`, `Walk`, `Sit`, `SitIdle`. It writes
-verification renders to `renders/rig_*.png` — check those before opening the browser.
+`rig_character.py` adds a 17-bone biped scaled to the character's height, binds it with
+automatic weights (validated, with a rigid per-region fallback), authors `Idle`, `Walk`,
+`Sit`, `SitIdle`, and trims the textures the office never samples. It writes verification
+renders to `renders/rig_<id>_*.png` — check those before opening the browser.
+
+Useful flags: `--id <name>` picks one character, `--tex 2048` keeps a bigger base colour,
+`--keep-maps` keeps the normal and roughness maps, `--no-render` skips the check renders.
 
 ### The seat-height contract
 
-The `Sit` clip ends with the hips at `SIT_HIP_Y = 0.46` above the object origin, and the
-runtime puts the root at `seat.y - SIT_HIP_Y`. One clip therefore serves all 16 seats even
-though their hip heights range 0.45–0.55 m. The value is written into `characters.json` so
-the runtime never hardcodes it. This works because a 1.38 m chibi's legs are shorter than the
-chairs — the feet dangle and never touch the floor, so the ±0.05 m offset is invisible.
+The `Sit` clip ends with the hips at `sit_hip_y` above the object origin, and the runtime
+puts the root at `seat.y - sit_hip_y`. One clip therefore serves all 16 seats even though
+their hip heights range 0.45–0.55 m. The value is written into `characters.json` per
+character, because the armature is scaled by `height / 1.38` — a 1.31 m engineer gets 0.437
+and the 1.40 m manager gets 0.467. This works because a chibi's legs are shorter than the
+chairs: the feet dangle and never touch the floor, so the offset never shows.
 
 ## Things that bite
 
