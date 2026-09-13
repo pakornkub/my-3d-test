@@ -9,6 +9,8 @@ import { hotspotFor, SKIP, SEAT_OF } from './hotspots.js';
 import { createUI } from './ui.js';
 
 const CHARACTER = 'eng_m1';
+// '/' during dev, '/my-3d-test/' on GitHub Pages -- vite substitutes this at build time
+const BASE = import.meta.env.BASE_URL;
 // 0.10 m cells (100 x 80 = 8000) cost about a millisecond to bake and keep the whole floor
 // as one connected region -- at 0.20 m the quantisation error walls off the manager's
 // alcove, whose tightest legal standing spot has only 0.30 m of clearance.
@@ -31,9 +33,9 @@ init().catch((e) => { console.error(e); ui.failed(e.message ?? e); });
 
 async function init() {
   ui.progress('กำลังโหลดฉากและตัวละคร…');
-  pack = await CharacterPack.load('/');
+  pack = await CharacterPack.load(BASE);
 
-  const office = await pack.loadOffice("/ube_office.glb");
+  const office = await pack.loadOffice(BASE + "ube_office.glb");
   officeRoot = office;
   matchScene(office, { stripMaps: false, envIntensity: 0.25 });
   viewer.scene.add(office);
