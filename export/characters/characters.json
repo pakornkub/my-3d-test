@@ -1,0 +1,52 @@
+{
+ "meta": {
+  "units": "metres",
+  "forward": "-Z in three.js (character faces -Z)",
+  "up": "+Y",
+  "origin": "between the feet, on the floor",
+  "source": "Tripo3D, restyled by tripo_import.py",
+  "style": {
+   "steps": 4,
+   "saturation": 0.74,
+   "value": 1.04,
+   "roughness": 0.62,
+   "drop_maps": true,
+   "smooth_deg": 16.0
+  },
+  "sit_note": "the Sit clip ends with the hips at sit_hip_y above the origin; put the root at (seat.y - sit_hip_y) so one clip fits every seat"
+ },
+ "characters": {
+  "eng_m1": {
+   "file": "eng_m1.glb",
+   "label": "Male Engineer 1",
+   "height_m": 1.38,
+   "rigged": true,
+   "bones": [
+    "Root",
+    "Hips",
+    "Spine",
+    "Head",
+    "UpperArm.L",
+    "LowerArm.L",
+    "Hand.L",
+    "UpperArm.R",
+    "LowerArm.R",
+    "Hand.R",
+    "UpperLeg.L",
+    "LowerLeg.L",
+    "Foot.L",
+    "UpperLeg.R",
+    "LowerLeg.R",
+    "Foot.R"
+   ],
+   "animations": [
+    "Idle",
+    "Walk",
+    "Sit",
+    "SitIdle"
+   ],
+   "sit_hip_y": 0.46,
+   "tris": 59264
+  }
+ }
+}

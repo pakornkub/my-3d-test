@@ -1,0 +1,640 @@
+{
+ "meta": {
+  "units": "metres",
+  "room": {
+   "x": 10.0,
+   "y": 8.0,
+   "height": 3.0,
+   "left_wall_at_x": 0,
+   "back_wall_at_y": 8.0
+  },
+  "three_axes": "glTF Y-up: three.x = blender.x, three.y = blender.z, three.z = -blender.y",
+  "seat_note": "seat = where the hips go; approach = stand here (behind the chair, or beside it when it backs onto a wall), face 'forward', walk onto 'seat' while playing the sit animation; use rotation_y_rad for the seated pose"
+ },
+ "seats": [
+  {
+   "name": "ManagerChair",
+   "kind": "executive_chair",
+   "blender": {
+    "seat": [
+     9.2,
+     7.5,
+     0.55
+    ],
+    "forward": [
+     -0.0,
+     -1.0,
+     0
+    ],
+    "approach": [
+     8.45,
+     7.5,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     9.2,
+     0.55,
+     -7.5
+    ],
+    "forward": [
+     -0.0,
+     0,
+     1.0
+    ],
+    "approach": [
+     8.45,
+     0,
+     -7.5
+    ],
+    "rotation_y_rad": 3.1416
+   }
+  },
+  {
+   "name": "ChairA1",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     1.55,
+     3.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     1.0,
+     0
+    ],
+    "approach": [
+     1.55,
+     3.3,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     1.55,
+     0.51,
+     -3.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     -1.0
+    ],
+    "approach": [
+     1.55,
+     0,
+     -3.3
+    ],
+    "rotation_y_rad": 0.0
+   }
+  },
+  {
+   "name": "ChairA3",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     1.55,
+     5.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     -1.0,
+     0
+    ],
+    "approach": [
+     1.55,
+     6.5,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     1.55,
+     0.51,
+     -5.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     1.0
+    ],
+    "approach": [
+     1.55,
+     0,
+     -6.5
+    ],
+    "rotation_y_rad": 3.1416
+   }
+  },
+  {
+   "name": "ChairA2",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     2.85,
+     3.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     1.0,
+     0
+    ],
+    "approach": [
+     2.85,
+     3.3,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     2.85,
+     0.51,
+     -3.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     -1.0
+    ],
+    "approach": [
+     2.85,
+     0,
+     -3.3
+    ],
+    "rotation_y_rad": 0.0
+   }
+  },
+  {
+   "name": "ChairA4",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     2.85,
+     5.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     -1.0,
+     0
+    ],
+    "approach": [
+     2.85,
+     6.5,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     2.85,
+     0.51,
+     -5.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     1.0
+    ],
+    "approach": [
+     2.85,
+     0,
+     -6.5
+    ],
+    "rotation_y_rad": 3.1416
+   }
+  },
+  {
+   "name": "ChairB1",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     5.45,
+     3.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     1.0,
+     0
+    ],
+    "approach": [
+     5.45,
+     3.3,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     5.45,
+     0.51,
+     -3.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     -1.0
+    ],
+    "approach": [
+     5.45,
+     0,
+     -3.3
+    ],
+    "rotation_y_rad": 0.0
+   }
+  },
+  {
+   "name": "ChairB3",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     5.45,
+     5.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     -1.0,
+     0
+    ],
+    "approach": [
+     5.45,
+     6.5,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     5.45,
+     0.51,
+     -5.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     1.0
+    ],
+    "approach": [
+     5.45,
+     0,
+     -6.5
+    ],
+    "rotation_y_rad": 3.1416
+   }
+  },
+  {
+   "name": "ChairB2",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     6.75,
+     3.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     1.0,
+     0
+    ],
+    "approach": [
+     6.75,
+     3.3,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     6.75,
+     0.51,
+     -3.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     -1.0
+    ],
+    "approach": [
+     6.75,
+     0,
+     -3.3
+    ],
+    "rotation_y_rad": 0.0
+   }
+  },
+  {
+   "name": "ChairB4",
+   "kind": "office_chair",
+   "blender": {
+    "seat": [
+     6.75,
+     5.9,
+     0.51
+    ],
+    "forward": [
+     -0.0,
+     -1.0,
+     0
+    ],
+    "approach": [
+     6.75,
+     6.5,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     6.75,
+     0.51,
+     -5.9
+    ],
+    "forward": [
+     -0.0,
+     0,
+     1.0
+    ],
+    "approach": [
+     6.75,
+     0,
+     -6.5
+    ],
+    "rotation_y_rad": 3.1416
+   }
+  },
+  {
+   "name": "Sofa_seat1",
+   "kind": "sofa",
+   "blender": {
+    "seat": [
+     0.455,
+     1.88,
+     0.45
+    ],
+    "forward": [
+     1.0,
+     0.0,
+     0
+    ],
+    "approach": [
+     0.455,
+     2.63,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     0.455,
+     0.45,
+     -1.88
+    ],
+    "forward": [
+     1.0,
+     0,
+     -0.0
+    ],
+    "approach": [
+     0.455,
+     0,
+     -2.63
+    ],
+    "rotation_y_rad": -1.5708
+   }
+  },
+  {
+   "name": "Sofa_seat2",
+   "kind": "sofa",
+   "blender": {
+    "seat": [
+     0.455,
+     1.4,
+     0.45
+    ],
+    "forward": [
+     1.0,
+     0.0,
+     0
+    ],
+    "approach": [
+     0.455,
+     2.15,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     0.455,
+     0.45,
+     -1.4
+    ],
+    "forward": [
+     1.0,
+     0,
+     -0.0
+    ],
+    "approach": [
+     0.455,
+     0,
+     -2.15
+    ],
+    "rotation_y_rad": -1.5708
+   }
+  },
+  {
+   "name": "Sofa_seat3",
+   "kind": "sofa",
+   "blender": {
+    "seat": [
+     0.455,
+     0.92,
+     0.45
+    ],
+    "forward": [
+     1.0,
+     0.0,
+     0
+    ],
+    "approach": [
+     0.455,
+     1.67,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     0.455,
+     0.45,
+     -0.92
+    ],
+    "forward": [
+     1.0,
+     0,
+     -0.0
+    ],
+    "approach": [
+     0.455,
+     0,
+     -1.67
+    ],
+    "rotation_y_rad": -1.5708
+   }
+  },
+  {
+   "name": "MC1",
+   "kind": "side_chair",
+   "blender": {
+    "seat": [
+     6.05,
+     0.7,
+     0.475
+    ],
+    "forward": [
+     -0.0,
+     1.0,
+     0
+    ],
+    "approach": [
+     5.3,
+     0.7,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     6.05,
+     0.475,
+     -0.7
+    ],
+    "forward": [
+     -0.0,
+     0,
+     -1.0
+    ],
+    "approach": [
+     5.3,
+     0,
+     -0.7
+    ],
+    "rotation_y_rad": 0.0
+   }
+  },
+  {
+   "name": "MC2",
+   "kind": "side_chair",
+   "blender": {
+    "seat": [
+     6.95,
+     0.7,
+     0.475
+    ],
+    "forward": [
+     -0.0,
+     1.0,
+     0
+    ],
+    "approach": [
+     6.2,
+     0.7,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     6.95,
+     0.475,
+     -0.7
+    ],
+    "forward": [
+     -0.0,
+     0,
+     -1.0
+    ],
+    "approach": [
+     6.2,
+     0,
+     -0.7
+    ],
+    "rotation_y_rad": 0.0
+   }
+  },
+  {
+   "name": "MC3",
+   "kind": "side_chair",
+   "blender": {
+    "seat": [
+     6.05,
+     2.0,
+     0.475
+    ],
+    "forward": [
+     -0.0,
+     -1.0,
+     0
+    ],
+    "approach": [
+     6.05,
+     2.6,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     6.05,
+     0.475,
+     -2.0
+    ],
+    "forward": [
+     -0.0,
+     0,
+     1.0
+    ],
+    "approach": [
+     6.05,
+     0,
+     -2.6
+    ],
+    "rotation_y_rad": 3.1416
+   }
+  },
+  {
+   "name": "MC4",
+   "kind": "side_chair",
+   "blender": {
+    "seat": [
+     6.95,
+     2.0,
+     0.475
+    ],
+    "forward": [
+     -0.0,
+     -1.0,
+     0
+    ],
+    "approach": [
+     6.95,
+     2.6,
+     0
+    ]
+   },
+   "three": {
+    "seat": [
+     6.95,
+     0.475,
+     -2.0
+    ],
+    "forward": [
+     -0.0,
+     0,
+     1.0
+    ],
+    "approach": [
+     6.95,
+     0,
+     -2.6
+    ],
+    "rotation_y_rad": 3.1416
+   }
+  }
+ ]
+}

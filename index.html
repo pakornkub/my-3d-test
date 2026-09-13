@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UBE Office</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="viewport"></div>
+
+    <header id="hud">
+      <div class="brand">
+        <span class="mark">UBE</span>
+        <span class="sub">Office &middot; interactive preview</span>
+      </div>
+      <div class="tools">
+        <div class="seg" role="group" aria-label="Camera">
+          <button data-cam="iso" class="on">Iso</button>
+          <button data-cam="free">Free</button>
+        </div>
+        <button id="reset">Reset view</button>
+      </div>
+    </header>
+
+    <p id="hint">คลิกพื้นเพื่อเดิน &middot; คลิกเก้าอี้เพื่อไปนั่ง &middot; ลากเพื่อหมุน &middot; สกรอลล์เพื่อซูม</p>
+
+    <aside id="card" hidden>
+      <button id="card-close" aria-label="Close">&times;</button>
+      <p class="cat"></p>
+      <h2></h2>
+      <p class="note"></p>
+      <div class="actions"></div>
+    </aside>
+
+    <div id="toast" hidden></div>
+
+    <div id="loading">
+      <div class="bar"><i></i></div>
+      <p>กำลังโหลดฉาก…</p>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

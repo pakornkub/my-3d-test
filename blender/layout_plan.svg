@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Segoe UI, Tahoma, sans-serif" font-size="11">
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="40" y="20" font-size="15" font-weight="bold" fill="#222">UBE Office - ผังพื้น (มองจากด้านบน) ห้อง 10 x 8 ม. | ผนังซ้าย = หน้าต่าง, ผนังบน = ผนังหลัง (ป้าย UBE)</text>
+
+  <!-- floor -->
+  <rect x="40" y="40" width="600" height="480" fill="#e9eaec" stroke="#bbb"/>
+  <!-- grid 1 m -->
+  <g stroke="#d5d7da" stroke-width="0.6">
+    <line x1="100" y1="40" x2="100" y2="520"/><line x1="160" y1="40" x2="160" y2="520"/><line x1="220" y1="40" x2="220" y2="520"/>
+    <line x1="280" y1="40" x2="280" y2="520"/><line x1="340" y1="40" x2="340" y2="520"/><line x1="400" y1="40" x2="400" y2="520"/>
+    <line x1="460" y1="40" x2="460" y2="520"/><line x1="520" y1="40" x2="520" y2="520"/><line x1="580" y1="40" x2="580" y2="520"/>
+    <line x1="40" y1="100" x2="640" y2="100"/><line x1="40" y1="160" x2="640" y2="160"/><line x1="40" y1="220" x2="640" y2="220"/>
+    <line x1="40" y1="280" x2="640" y2="280"/><line x1="40" y1="340" x2="640" y2="340"/><line x1="40" y1="400" x2="640" y2="400"/><line x1="40" y1="460" x2="640" y2="460"/>
+  </g>
+
+  <!-- circulation loop (drawn under furniture) -->
+  <g fill="none" stroke="#2f9e44" stroke-width="3" stroke-dasharray="8 6">
+    <polyline points="289,337 289,106 514,106 514,337 289,337"/>
+    <line x1="289" y1="337" x2="289" y2="472"/>
+    <line x1="289" y1="106" x2="70" y2="106"/>
+    <line x1="514" y1="337" x2="620" y2="337"/>
+  </g>
+  <!-- walkway width shading -->
+  <g fill="#2f9e44" fill-opacity="0.10">
+    <rect x="250" y="40" width="78" height="480"/>
+    <rect x="40" y="64" width="600" height="84"/>
+    <rect x="484" y="148" width="60" height="230"/>
+    <rect x="40" y="298" width="600" height="66"/>
+  </g>
+
+  <!-- walls -->
+  <rect x="29" y="29" width="11" height="491" fill="#262a33"/>
+  <rect x="29" y="29" width="611" height="11" fill="#262a33"/>
+  <!-- windows on the left wall -->
+  <g fill="#9fd3ff">
+    <rect x="29" y="376" width="11" height="96"/><rect x="29" y="220" width="11" height="96"/><rect x="29" y="64" width="11" height="96"/>
+  </g>
+  <text x="14" y="430" transform="rotate(-90 14 430)" fill="#1d6fb8" font-size="10">หน้าต่าง 3 บาน</text>
+
+  <!-- UBE letters + TV on the back wall -->
+  <rect x="274" y="31" width="132" height="7" fill="#0a6bd1"/>
+  <text x="340" y="27" text-anchor="middle" fill="#0a6bd1" font-size="10" font-weight="bold">ตัวอักษร UBE บนผนัง (สูง 2.0-2.6 ม.)</text>
+  <rect x="433" y="31" width="60" height="7" fill="#444"/>
+  <text x="463" y="27" text-anchor="middle" fill="#444" font-size="10">TV</text>
+
+  <!-- back wall storage -->
+  <rect x="49" y="40" width="54" height="21" fill="#d9b98a" stroke="#8a6a3d"/><text x="76" y="72" text-anchor="middle" font-size="9">ชั้นหนังสือ</text>
+  <rect x="112" y="40" width="120" height="27" fill="#d9b98a" stroke="#8a6a3d"/><text x="172" y="78" text-anchor="middle" font-size="9">ตู้ไม้ยาว + เครื่องพิมพ์ + ไม้เลื้อย</text>
+  <circle cx="253" cy="52" r="8" fill="#888"/><text x="253" y="72" text-anchor="middle" font-size="9">ถังขยะ</text>
+  <rect x="424" y="40" width="78" height="24" fill="#fff" stroke="#555"/><text x="463" y="76" text-anchor="middle" font-size="9">ตู้เตี้ยใต้ TV</text>
+
+  <!-- manager -->
+  <rect x="544" y="88" width="96" height="48" fill="#fff" stroke="#233"/>
+  <text x="592" y="115" text-anchor="middle" font-size="10" font-weight="bold">โต๊ะผู้จัดการ</text>
+  <text x="592" y="127" text-anchor="middle" font-size="9">1.6 x 0.8 หันหน้าเข้าห้อง</text>
+  <circle cx="592" cy="67" r="18" fill="#1d6fb8" stroke="#123"/>
+  <circle cx="625" cy="55" r="12" fill="#5fb865" stroke="#2e6b33"/>
+
+  <!-- pod A -->
+  <g fill="#fff" stroke="#233">
+    <rect x="94" y="226" width="78" height="42"/><rect x="172" y="226" width="78" height="42"/>
+    <rect x="94" y="184" width="78" height="42"/><rect x="172" y="184" width="78" height="42"/>
+  </g>
+  <line x1="94" y1="226" x2="250" y2="226" stroke="#233" stroke-width="3"/>
+  <g fill="#333"><circle cx="133" cy="286" r="17"/><circle cx="211" cy="286" r="17"/><circle cx="133" cy="166" r="17"/><circle cx="211" cy="166" r="17"/></g>
+  <text x="172" y="212" text-anchor="middle" font-size="10" font-weight="bold">Pod A (4 ที่นั่ง)</text>
+  <text x="172" y="252" text-anchor="middle" font-size="9">โต๊ะ 1.3 x 0.7 หันชนกัน มีฉากกั้นเตี้ย</text>
+
+  <!-- pod B -->
+  <g fill="#fff" stroke="#233">
+    <rect x="328" y="226" width="78" height="42"/><rect x="406" y="226" width="78" height="42"/>
+    <rect x="328" y="184" width="78" height="42"/><rect x="406" y="184" width="78" height="42"/>
+  </g>
+  <line x1="328" y1="226" x2="484" y2="226" stroke="#233" stroke-width="3"/>
+  <g fill="#333"><circle cx="367" cy="286" r="17"/><circle cx="445" cy="286" r="17"/><circle cx="367" cy="166" r="17"/><circle cx="445" cy="166" r="17"/></g>
+  <text x="406" y="212" text-anchor="middle" font-size="10" font-weight="bold">Pod B (4 ที่นั่ง)</text>
+
+  <!-- lounge -->
+  <rect x="58" y="376" width="144" height="120" fill="#d7e3f0" stroke="#9ab"/>
+  <rect x="49" y="382" width="51" height="108" fill="#a9abb0" stroke="#555"/><text x="74" y="440" text-anchor="middle" font-size="9" transform="rotate(-90 74 440)">โซฟา</text>
+  <rect x="130" y="409" width="54" height="54" fill="#fff" stroke="#555"/><text x="157" y="440" text-anchor="middle" font-size="9">โต๊ะกาแฟ</text>
+  <circle cx="70" cy="346" r="12" fill="#5fb865" stroke="#2e6b33"/>
+  <text x="130" y="512" text-anchor="middle" font-size="10" font-weight="bold">มุมพักผ่อน</text>
+
+  <!-- meeting -->
+  <rect x="376" y="412" width="108" height="54" fill="#fff" stroke="#233"/>
+  <text x="430" y="443" text-anchor="middle" font-size="10" font-weight="bold">โต๊ะประชุม 1.8 x 0.9</text>
+  <g fill="#f5f5f5" stroke="#555"><circle cx="403" cy="493" r="15"/><circle cx="457" cy="493" r="15"/><circle cx="403" cy="385" r="15"/><circle cx="457" cy="385" r="15"/></g>
+
+  <!-- misc right-front -->
+  <rect x="595" y="481" width="18" height="18" fill="#dbe9ff" stroke="#369"/><text x="604" y="512" text-anchor="middle" font-size="9">ตู้น้ำ</text>
+  <circle cx="616" cy="436" r="12" fill="#5fb865" stroke="#2e6b33"/>
+
+  <!-- 5 characters -->
+  <g stroke="#b3261e" stroke-width="2" fill="#ff8a80">
+    <circle cx="289" cy="430" r="15"/><circle cx="289" cy="208" r="15"/><circle cx="184" cy="106" r="15"/><circle cx="514" cy="232" r="15"/><circle cx="430" cy="337" r="15"/>
+  </g>
+  <g fill="#b3261e" font-size="9" font-weight="bold" text-anchor="middle">
+    <text x="289" y="434">1</text><text x="289" y="212">2</text><text x="184" y="110">3</text><text x="514" y="236">4</text><text x="430" y="341">5</text>
+  </g>
+
+  <!-- width labels -->
+  <g fill="#1b7a2d" font-size="10" font-weight="bold">
+    <text x="289" y="150" text-anchor="middle">ทางเดินหลัก 1.3 ม.</text>
+    <text x="150" y="98" text-anchor="middle">ทางเดินหลังห้อง 1.4 ม.</text>
+    <text x="514" y="300" text-anchor="middle" transform="rotate(-90 514 300)">ทางเดินขวา 1.0 ม.</text>
+    <text x="560" y="325" text-anchor="middle">แนวเชื่อมหน้า 1.1 ม.</text>
+    <text x="289" y="500" text-anchor="middle">โถงหน้า โล่ง 3 ม.</text>
+  </g>
+
+  <!-- camera hint -->
+  <g stroke="#666" fill="#666">
+    <line x1="700" y1="500" x2="655" y2="455" stroke-width="2"/><polygon points="655,455 668,458 658,468"/>
+  </g>
+  <text x="700" y="518" font-size="10" fill="#666">มุมกล้อง isometric มองจากมุมล่างขวา</text>
+
+  <!-- legend -->
+  <g font-size="11" fill="#222">
+    <rect x="670" y="50" width="14" height="14" fill="#fff" stroke="#233"/><text x="690" y="61">โต๊ะ (ท็อปขาว ขาโครงเหล็กเข้ม)</text>
+    <circle cx="677" cy="82" r="7" fill="#333"/><text x="690" y="86">เก้าอี้สำนักงาน (สีดำ / ผู้จัดการสีน้ำเงิน)</text>
+    <circle cx="677" cy="106" r="7" fill="#5fb865" stroke="#2e6b33"/><text x="690" y="110">ต้นไม้ (ใบจริง)</text>
+    <circle cx="677" cy="130" r="7" fill="#ff8a80" stroke="#b3261e"/><text x="690" y="134">ตัวละคร กว้าง 0.5 ม. (5 ตัว)</text>
+    <line x1="668" y1="154" x2="686" y2="154" stroke="#2f9e44" stroke-width="3" stroke-dasharray="6 4"/><text x="690" y="158">ลูปทางเดินหลัก</text>
+    <rect x="670" y="170" width="14" height="14" fill="#2f9e44" fill-opacity="0.15"/><text x="690" y="181">พื้นที่เดินได้ (กว้าง ≥1.0 ม.)</text>
+  </g>
+  <g font-size="10" fill="#444">
+    <text x="670" y="215" font-weight="bold">สิ่งที่เปลี่ยนจากรอบก่อน</text>
+    <text x="670" y="232">- ไม่มีประตู, ห้องขยายเป็น 10 x 8 ม.</text>
+    <text x="670" y="248">- โต๊ะ 8 ที่นั่ง 2 pod ขนาดจริง 1.3 x 0.7</text>
+    <text x="670" y="264">- ทุกโซนมีทางเข้าจากลูปเดียวกัน</text>
+    <text x="670" y="280">- ไม่มีของวางกลางทางเดิน</text>
+    <text x="670" y="296">- โต๊ะผู้จัดการตัวตรง ชิดผนังหลังขวา</text>
+    <text x="670" y="312">- สัดส่วนอุปกรณ์บนโต๊ะตามขนาดจริง</text>
+  </g>
+</svg>

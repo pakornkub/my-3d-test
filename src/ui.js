@@ -1,0 +1,64 @@
+// ui.js -- the HTML overlay: camera toolbar, object card, toast, loading veil.
+// Everything is plain DOM; the 3D layer talks to it through this one object.
+
+export function createUI({ onCamera, onReset, onAction }) {
+  const card = document.getElementById('card');
+  const cardCat = card.querySelector('.cat');
+  const cardTitle = card.querySelector('h2');
+  const cardNote = card.querySelector('.note');
+  const cardActions = card.querySelector('.actions');
+  const toast = document.getElementById('toast');
+  const loading = document.getElementById('loading');
+  const loadingText = loading.querySelector('p');
+  const camButtons = [...document.querySelectorAll('[data-cam]')];
+
+  camButtons.forEach((b) => b.addEventListener('click', () => {
+    const mode = b.dataset.cam;
+    camButtons.forEach((x) => x.classList.toggle('on', x === b));
+    onCamera(mode);
+  }));
+  document.getElementById('reset').addEventListener('click', onReset);
+  document.getElementById('card-close').addEventListener('click', () => hideCard());
+
+  let toastTimer = 0;
+
+  function showCard(name, spot) {
+    cardCat.textContent = spot.cat ?? '';
+    cardTitle.textContent = spot.label ?? name;
+    cardNote.textContent = spot.note ?? '';
+    cardActions.replaceChildren(...(spot.actions ?? []).map((a) => {
+      const b = document.createElement('button');
+      b.textContent = a.label;
+      if (a.primary) b.className = 'primary';
+      b.addEventListener('click', () => onAction(a.id, name, spot));
+      return b;
+    }));
+    card.hidden = false;
+  }
+
+  function hideCard() { card.hidden = true; }
+
+  function say(text, ms = 2200) {
+    toast.textContent = text;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, ms);
+  }
+
+  function progress(text) { loadingText.textContent = text; }
+
+  function ready() {
+    loading.classList.add('done');
+    setTimeout(() => { loading.style.display = 'none'; }, 450);
+  }
+
+  function failed(err) {
+    loading.classList.remove('done');
+    loading.style.display = '';
+    loading.querySelector('.bar').style.display = 'none';
+    loadingText.textContent = 'โหลดไม่สำเร็จ: ' + err;
+    loadingText.style.color = '#b4232a';
+  }
+
+  return { showCard, hideCard, say, progress, ready, failed };
+}
