@@ -459,6 +459,8 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
     statuses[id] = { state, ticket };
   }
   function statusOf(id) { return statuses[id]; }
+  const WARN_RATIO = 0.8;
+  const OVER_RATIO = 1;
   /**
    * The team figure -- today's team cost against the daily budget, with no server this
    * still renders (as `team`, defaulting to 0) but `budget` is undefined so no denominator
@@ -467,9 +469,10 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
   function cost({ team, budget, breakdown }) {
     const ratio = budget ? team / budget : 0;
     teamCostEl.textContent = `วันนี้ $${team.toFixed(2)}` + (budget != null ? ` / $${budget}` : '');
-    teamCostEl.classList.toggle('over', budget != null && ratio >= 1);
-    teamCostEl.classList.toggle('warn', budget != null && ratio >= 0.8 && ratio < 1);
-    teamCostEl.title = Object.entries(breakdown).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`).join('\n');
+    teamCostEl.classList.toggle('over', budget != null && ratio >= OVER_RATIO);
+    teamCostEl.classList.toggle('warn', budget != null && ratio >= WARN_RATIO && ratio < OVER_RATIO);
+    const rows = Object.entries(breakdown).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`);
+    teamCostEl.title = [...rows, 'วันนี้ = วัน UTC (รีเซ็ต 07:00 น. เวลาไทย)'].join('\n');
   }
   cost({ team: 0, budget: undefined, breakdown: {} });
   function mode(text, kind = '') {

@@ -37,27 +37,21 @@ export class Director {
   #sessions = new Map();   // session key (session ?? agent) -> { agent, usd }, this UTC day
   #costDay = null;         // UTC day (ms / 86_400_000) of the current bucket
 
-  /** Member cost: the sum of the latest running totals of `id`'s sessions this UTC day. */
-  memberCost(id) {
-    let sum;
-    for (const { agent, usd } of this.#sessions.values()) {
-      if (agent === id) sum = (sum ?? 0) + usd;
-    }
-    return sum;
-  }
-
-  /** Team cost: the sum of the latest running totals of every session today, roster or not. */
-  teamCost() {
-    let sum = 0;
-    for (const { usd } of this.#sessions.values()) sum += usd;
-    return sum;
-  }
-
   /** Every agent id that has spent money today, summed across its sessions -- roster or not. */
   breakdown() {
     const out = {};
     for (const { agent, usd } of this.#sessions.values()) out[agent] = (out[agent] ?? 0) + usd;
     return out;
+  }
+
+  /** Member cost: the sum of the latest running totals of `id`'s sessions this UTC day. */
+  memberCost(id) {
+    return this.breakdown()[id];
+  }
+
+  /** Team cost: the sum of the latest running totals of every session today, roster or not. */
+  teamCost() {
+    return Object.values(this.breakdown()).reduce((a, b) => a + b, 0);
   }
 
   /** The daily-budget-usd from the connection snapshot; republishes the team figure right away. */
