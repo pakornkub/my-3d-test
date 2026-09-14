@@ -110,12 +110,10 @@ export class Flow {
     this.emit(make('flow.phase', { phase: this.phase, hitl: HITL.has(this.phase), feature: this.state.feature }));
     const res = await s.send(text);
     if (s.sessionId && s.sessionId !== this.state.managerSessionId) { this.state.managerSessionId = s.sessionId; this.save(); }
-    // the manager's own session.cost events never carry `session` (its schema field is
-    // still agent-only), so this is the one key the log itself ever files this session
-    // under -- writing anywhere else would leave a second, stale entry for the same
-    // session once state.costs is next reseeded from the log (ADR-0002: one key per session)
-    this.state.costs = { ...this.state.costs, manager: { agent: 'manager', usd: s.costUsd } };
-    this.save();
+    // the session itself already broadcast its own session.cost event (tagged with its
+    // session id, ADR-0002), which state.logEvent appended to today's log -- state.costs
+    // stays boot-seeded from that log rather than getting a second, easily-drifting write
+    // here (see the git history of this file for how that used to go wrong)
     this.refreshBoard();
     if (res?.ended) return res;
     if (ask && HITL.has(this.phase) && s.lastText) this.askHuman(askKind);

@@ -39,10 +39,13 @@ export class Session {
    * @param agent    crew id this session speaks as (manager, eng_m1, ...)
    * @param emit     (event) => void
    * @param onFile   (path) => void after a Write/Edit lands, for docs/board refresh
-   * @param costSeed running total already spent today by this agent (from the day's log),
-   *                 e.g. on a resumed session -- so a restart never makes the figure the
-   *                 scene shows jump backwards (the SDK's own total_cost_usd starts at 0
-   *                 for a fresh process even when resuming an older session)
+   * @param costSeed this session's own running total as of the last time it was logged today
+   *                 (looked up by session id, falling back to the plain agent id only for a
+   *                 legacy entry that predates the `session` field, ADR-0001) -- so resuming
+   *                 it after a restart never makes the figure the scene shows jump backwards.
+   *                 The SDK documents `total_cost_usd` as starting fresh on a resumed session
+   *                 (see SDKResultMessage in the Agent SDK type declarations), so a fresh
+   *                 process must re-add the seed rather than read total_cost_usd alone.
    * @param options  everything for query(): cwd, model, systemPrompt, agents, allowedTools,
    *                 disallowedTools, permissionMode, canUseTool, settingSources, skills,
    *                 mcpServers, maxTurns, maxBudgetUsd, resume, env
@@ -168,7 +171,10 @@ export class Session {
         this.turns += msg.num_turns ?? 1;
         if (typeof msg.total_cost_usd === 'number') {
           this.costUsd = this.costSeed + msg.total_cost_usd;
-          this.emit(make('session.cost', { agent: this.agent, usd: this.costUsd, turns: this.turns }));
+          // tag the session id so this running total keys itself in state.mjs (ADR-0002)
+          // instead of collapsing onto the plain agent id, which would make a second
+          // session of the same agent overwrite the first rather than add to it
+          this.emit(make('session.cost', { agent: this.agent, usd: this.costUsd, turns: this.turns, ...(this.sessionId ? { session: this.sessionId } : {}) }));
         }
         if (msg.session_id) this.sessionId = msg.session_id;
         if (msg.subtype !== 'success') {

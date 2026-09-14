@@ -1,7 +1,8 @@
 // state.mjs -- what survives a server restart.
 //
 // One JSON file per project under server/state/<project>.json holding the manager's SDK
-// session id, the active feature, the current phase and the ticket sessions in flight.
+// session id, the active feature, the current phase, the ticket sessions in flight and
+// today's running totals by session key (reseeded from the log at boot, see runningTotals).
 // Small enough to rewrite whole on every change; a database can replace it later without
 // touching callers, which only ever call load()/save().
 

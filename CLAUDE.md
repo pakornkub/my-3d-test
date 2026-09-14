@@ -50,7 +50,7 @@ Three layers that meet at exactly two contracts. Respect the seams; most bugs co
 - `permissions.mjs` — `canUseTool` per role. Writes are fenced (manager: docs/`.scratch` only; reviewer: `.md`; QA: `.scratch`), Bash matches the repo's allowlist by prefix with chained commands split apart, anything else becomes an `agent.ask` on the scene. **No answer is a deny, never a silent allow.**
 - `board.mjs` — `.scratch/<feature>/issues/NN-slug.md` parsed into the ticket board (`Status:`, `Blocked by:`, `Assignee:`, `- [ ]` criteria) and claims written back. The board is markdown on disk; there is no database.
 - `onboard.mjs` — the 8-step checklist a repo passes before the manager takes ideas. AFK steps run here; steps 4–6 are handed to the manager session. Step 8 rehearses in a throwaway worktree (`.worktrees/onboard-rehearsal`).
-- `state.mjs` → `server/state/<project>.json` (session id, phase, feature) and `server/log/<project>-<day>.jsonl` (every event, replayable). Both gitignored, along with `server/projects.json`.
+- `state.mjs` → `server/state/<project>.json` (session id, phase, feature, today's running totals by session key) and `server/log/<project>-<day>.jsonl` (every event, replayable). Both gitignored, along with `server/projects.json`.
 
 ### Configuration that is really code
 

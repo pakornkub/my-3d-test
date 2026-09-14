@@ -52,8 +52,8 @@ async function activate(p) {
   await flow?.close();
   project = p;
   st = state.load(p.id);
-  // seed today's per-member figures from the log, not from the state file, so a restart
-  // never shows stale money and deleting today's log starts the day back at zero
+  // seed today's per-session running totals from the log, not from the state file, so a
+  // restart never shows stale money and deleting today's log starts the day back at zero
   st.costs = state.runningTotals(state.readLog(p.id));
   reg.current = p.id;
   saveRegistry(reg);
@@ -220,8 +220,12 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify(projectStatus()));
     ws.send(JSON.stringify(make('flow.phase', { phase: st.phase, feature: st.feature })));
     if (flow) ws.send(JSON.stringify(make('board.update', { feature: st.feature, tickets: flow.snapshot().tickets })));
-    // today's running totals, so neither a browser reload nor a server restart appears to reset the day
-    for (const ev of state.costEvents(st.costs)) ws.send(JSON.stringify(make('session.cost', ev)));
+    // today's running totals, derived fresh from the log rather than the boot-time st.costs
+    // snapshot -- st.costs is only reseeded at activate(), so during implement a ticket
+    // session's cost logged since boot would otherwise be missing from a mid-day reload
+    for (const ev of state.costEvents(state.runningTotals(state.readLog(project.id)))) {
+      ws.send(JSON.stringify({ ...make('session.cost', ev), replayed: true }));
+    }
     // the recent conversation, so a reloaded scene is not blank
     const recent = state.readLog(project.id).filter((e) => ['agent.say', 'flow.ask', 'docs.update', 'ticket.closed', 'feature.report'].includes(e.type)).slice(-40);
     for (const ev of recent) ws.send(JSON.stringify({ ...ev, replayed: true }));
