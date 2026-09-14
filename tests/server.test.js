@@ -6,8 +6,8 @@ import path from 'node:path';
 import { parseAgentFile, loadTeam, agentDefinitions } from '../server/team.mjs';
 import { parseTicket, readBoard, claimTicket, setTicketField } from '../server/board.mjs';
 import { parseOffice, renderOffice, commandAllowed, allowlistRules, DEFAULTS } from '../server/office.mjs';
-import { summarizeTool } from '../server/runner.mjs';
-import { runningTotals, costFor, costEvents } from '../server/state.mjs';
+import { summarizeTool, dayScopedCost } from '../server/runner.mjs';
+import { runningTotals, runningTotalFor, costEvents, managerRunningTotal } from '../server/state.mjs';
 
 // ---------------------------------------------------------------- team
 test('parseAgentFile reads frontmatter lists and scalars, body becomes the prompt', () => {
@@ -103,8 +103,8 @@ test('runningTotals keys by session id, not by agent: two sessions of one agent 
     { type: 'session.cost', agent: 'eng_m1', session: 's2', usd: 0.10 },
   ]);
   assert.deepEqual(totals, {
-    s1: { agent: 'eng_m1', usd: 0.42 },
-    s2: { agent: 'eng_m1', usd: 0.10 },
+    s1: { agent: 'eng_m1', usd: 0.42, session: 's1' },
+    s2: { agent: 'eng_m1', usd: 0.10, session: 's2' },
   });
 });
 
@@ -137,23 +137,29 @@ test('runningTotals of an empty log is an empty map', () => {
 });
 
 // ---------------------------------------------------------------- state: key-space
-test('costFor finds a legacy agent-keyed entry even when a session id is already known', () => {
-  // today's shape: session.cost carries no `session` field yet, so the log-derived map is
+test('runningTotalFor finds a legacy agent-keyed entry even when a session id is already known', () => {
+  // a log written before the runner tagged session.cost events with `session` (ADR-0001) is
   // keyed by agent id -- a caller that already knows the SDK session id must still find it
   const costs = runningTotals([{ type: 'session.cost', agent: 'manager', usd: 1.5 }]);
-  assert.equal(costFor(costs, { agent: 'manager', session: 'sess-A' }), 1.5);
+  assert.equal(runningTotalFor(costs, { agent: 'manager', session: 'sess-A' }), 1.5);
 });
 
-test('costFor prefers the session-keyed entry once session.cost events carry `session` (ADR-0002)', () => {
+test('runningTotalFor prefers the session-keyed entry once session.cost events carry `session` (ADR-0002)', () => {
   const costs = runningTotals([
     { type: 'session.cost', agent: 'manager', usd: 1.5 },              // stale, pre-upgrade line
     { type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 4 }, // fresh, same session
   ]);
-  assert.equal(costFor(costs, { agent: 'manager', session: 'sess-A' }), 4);
+  assert.equal(runningTotalFor(costs, { agent: 'manager', session: 'sess-A' }), 4);
 });
 
-test('costFor is 0 for an agent with nothing logged', () => {
-  assert.equal(costFor({}, { agent: 'manager', session: null }), 0);
+test('runningTotalFor is 0 for an agent with nothing logged', () => {
+  assert.equal(runningTotalFor({}, { agent: 'manager', session: null }), 0);
+});
+
+test('managerRunningTotal is the one lookup flow.mjs and pipeline.mjs both defer to, so they cannot drift apart', () => {
+  const costs = runningTotals([{ type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 3 }]);
+  assert.equal(managerRunningTotal({ costs, managerSessionId: 'sess-A' }), 3);
+  assert.equal(managerRunningTotal({ costs: {}, managerSessionId: null }), 0);
 });
 
 test('costEvents reconstructs the real agent id, not the map key, for a session-keyed entry', () => {
@@ -171,6 +177,24 @@ test('summarizeTool gives a short human line per tool', () => {
   assert.equal(summarizeTool('Edit', { file_path: 'D:\\repo\\src\\agents\\x.js' }), 'src/agents/x.js');
   assert.equal(summarizeTool('Bash', { command: 'npm test', description: 'Run tests' }), 'Run tests');
   assert.match(summarizeTool('Skill', { skill: 'tdd' }), /tdd/);
+});
+
+// ---------------------------------------------------------------- runner: day rollover (spec story 12)
+test('dayScopedCost adds the SDK delta to the seed within the same day, exactly like before there was a day to track', () => {
+  const prev = { day: '2026-09-15', dayBaselineCost: 0, costSeed: 2 };
+  assert.deepEqual(dayScopedCost(prev, 0.5, '2026-09-15'), { day: '2026-09-15', dayBaselineCost: 0, costSeed: 2, usd: 2.5 });
+});
+
+test('dayScopedCost measures only the delta since the last rollover once one has happened', () => {
+  const prev = { day: '2026-09-16', dayBaselineCost: 3, costSeed: 0 };
+  assert.deepEqual(dayScopedCost(prev, 3.5, '2026-09-16'), { day: '2026-09-16', dayBaselineCost: 3, costSeed: 0, usd: 0.5 });
+});
+
+test('dayScopedCost drops everything accrued before a UTC day boundary a long-lived session crosses (spec story 12)', () => {
+  // a session that never restarts would otherwise keep compounding total_cost_usd forever,
+  // leaking yesterday's spend into every day after it
+  const prev = { day: '2026-09-15', dayBaselineCost: 0, costSeed: 2 };
+  assert.deepEqual(dayScopedCost(prev, 5, '2026-09-16'), { day: '2026-09-16', dayBaselineCost: 5, costSeed: 0, usd: 0 });
 });
 
 // ---------------------------------------------------------------- flow: skills

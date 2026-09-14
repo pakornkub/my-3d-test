@@ -15,7 +15,7 @@ import { make } from '../src/agents/events.js';
 import { Session } from './runner.mjs';
 import { readBoard, listFeatures, watchBoard } from './board.mjs';
 import { agentDefinitions, teamHash } from './team.mjs';
-import { costFor } from './state.mjs';
+import { managerRunningTotal } from './state.mjs';
 
 const PLUGIN = 'mattpocock-skills';
 const PLUGIN_VERSION = '1.2.3';
@@ -71,7 +71,7 @@ export class Flow {
       emit: this.emit,
       onFile: (p) => this.#onFile(p),
       stallMinutes: Number(policy['stall-minutes'] ?? 6),
-      costSeed: costFor(this.state.costs, { agent: 'manager', session: this.state.managerSessionId }),
+      costSeed: managerRunningTotal(this.state),
       options: {
         cwd: this.repo,
         model: m.model,
@@ -110,10 +110,9 @@ export class Flow {
     this.emit(make('flow.phase', { phase: this.phase, hitl: HITL.has(this.phase), feature: this.state.feature }));
     const res = await s.send(text);
     if (s.sessionId && s.sessionId !== this.state.managerSessionId) { this.state.managerSessionId = s.sessionId; this.save(); }
-    // the session itself already broadcast its own session.cost event (tagged with its
-    // session id, ADR-0002), which state.logEvent appended to today's log -- state.costs
-    // stays boot-seeded from that log rather than getting a second, easily-drifting write
-    // here (see the git history of this file for how that used to go wrong)
+    // the session already broadcast its own session.cost event (tagged with its session id,
+    // ADR-0002); index.mjs's broadcast() is what keeps state.costs and the state file in
+    // sync with that, uniformly for every agent, so this turn doesn't also write it
     this.refreshBoard();
     if (res?.ended) return res;
     if (ask && HITL.has(this.phase) && s.lastText) this.askHuman(askKind);
@@ -254,7 +253,7 @@ export class Flow {
     return tickets;
   }
 
-  /** What a fresh scene needs to draw itself. */
+  /** What a fresh scene needs to draw itself. Today's totals go out as their own session.cost events (index.mjs), not duplicated here. */
   snapshot() {
     return {
       phase: this.phase,
@@ -262,7 +261,6 @@ export class Flow {
       tickets: this.state.feature ? readBoard(this.repo, this.state.feature).map(({ file, ...t }) => t) : [],
       teamHash: teamHash(),
       pluginVersion: PLUGIN_VERSION,
-      costs: this.state.costs,
     };
   }
 

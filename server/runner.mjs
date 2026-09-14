@@ -8,8 +8,24 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { make } from '../src/agents/events.js';
+import { today } from './state.mjs';
 
 const SHORT = (s, n = 90) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s ?? '');
+
+/**
+ * Folds the SDK's own cumulative `total_cost_usd` into the running total to emit, scoped to
+ * `day` so a session that outlives the UTC boundary doesn't leak yesterday's spend into
+ * today's figure (spec story 12: "the day's total cuts over to a fresh bucket while the
+ * server keeps running"). On the day `prev.day` was captured for, the seed and the SDK's
+ * delta since the last rollover simply add. The moment `day` (the caller's current day)
+ * differs, everything accrued so far -- seed included -- is yesterday's and is dropped: the
+ * new day starts this session at 0, and `totalCostUsd` becomes the new baseline every future
+ * call measures its delta against.
+ */
+export function dayScopedCost(prev, totalCostUsd, day = today()) {
+  if (day !== prev.day) return { day, dayBaselineCost: totalCostUsd, costSeed: 0, usd: 0 };
+  return { day, dayBaselineCost: prev.dayBaselineCost, costSeed: prev.costSeed, usd: prev.costSeed + (totalCostUsd - prev.dayBaselineCost) };
+}
 
 /** A one-line human summary of a tool call, for the bubble over the head. Paths are shown relative to `cwd`. */
 export function summarizeTool(name, input = {}, cwd = null) {
@@ -63,6 +79,8 @@ export class Session {
     this.sessionId = options.resume ?? null;
     this.costSeed = costSeed;
     this.costUsd = costSeed;
+    this.costDay = today();      // the UTC day costSeed was captured for, see dayScopedCost
+    this.dayBaselineCost = 0;    // total_cost_usd observed at the last day rollover, if any
     this.turns = 0;
     this.busy = false;
     this.lastText = '';
@@ -170,7 +188,11 @@ export class Session {
       case 'result': {
         this.turns += msg.num_turns ?? 1;
         if (typeof msg.total_cost_usd === 'number') {
-          this.costUsd = this.costSeed + msg.total_cost_usd;
+          const scoped = dayScopedCost({ day: this.costDay, dayBaselineCost: this.dayBaselineCost, costSeed: this.costSeed }, msg.total_cost_usd);
+          this.costDay = scoped.day;
+          this.dayBaselineCost = scoped.dayBaselineCost;
+          this.costSeed = scoped.costSeed;
+          this.costUsd = scoped.usd;
           // tag the session id so this running total keys itself in state.mjs (ADR-0002)
           // instead of collapsing onto the plain agent id, which would make a second
           // session of the same agent overwrite the first rather than add to it
