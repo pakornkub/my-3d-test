@@ -33,6 +33,18 @@ export class Director {
     for (const m of crew.members) this.#set(m.id, 'idle');
   }
 
+  #sessions = new Map();   // session key (session ?? agent) -> { agent, usd }, this UTC day
+  #costDay = null;         // UTC day (ms / 86_400_000) of the current bucket
+
+  /** Member cost: the sum of the latest running totals of `id`'s sessions this UTC day. */
+  memberCost(id) {
+    let sum;
+    for (const { agent, usd } of this.#sessions.values()) {
+      if (agent === id) sum = (sum ?? 0) + usd;
+    }
+    return sum;
+  }
+
   // ---------------------------------------------------------------- helpers
   member(id) { return this.crew.members.find((m) => m.id === id) ?? null; }
 
@@ -306,7 +318,14 @@ export class Director {
     this.panel.tv?.({ title: `รายงานปิดงาน: ${ev.feature}`, markdown: ev.report, merge: { branch: `feature/${ev.feature}`, mainBranch: ev.mainBranch ?? 'main' } });
   }
 
-  on_session_cost(ev) { this.panel.cost?.(ev); }
+  on_session_cost(ev) {
+    const day = Math.floor(ev.t / 86_400_000);
+    if (this.#costDay !== null && day !== this.#costDay) this.#sessions.clear();
+    this.#costDay = day;
+    this.#sessions.set(ev.session ?? ev.agent, { agent: ev.agent, usd: ev.usd });
+    this.panel.cost?.(ev);
+    this.onStatus();
+  }
 
   on_ci_status(ev) {
     this.panel.transcript?.({ agent: 'manager', kind: ev.state === 'success' ? 'done' : 'warn', text: `CI ${ev.state}: ${ev.pr}` });
