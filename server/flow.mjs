@@ -15,7 +15,7 @@ import { make } from '../src/agents/events.js';
 import { Session } from './runner.mjs';
 import { readBoard, listFeatures, watchBoard } from './board.mjs';
 import { agentDefinitions, teamHash } from './team.mjs';
-import { managerRunningTotal } from './state.mjs';
+import { managerRunningTotal } from './costs.mjs';
 
 const PLUGIN = 'mattpocock-skills';
 const PLUGIN_VERSION = '1.2.3';

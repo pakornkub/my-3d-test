@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Flow } from '../server/flow.mjs';
-import { runningTotals } from '../server/state.mjs';
+import { runningTotals } from '../server/costs.mjs';
 
 // an empty repo per test: a real .scratch/ would start an fs.watch and keep the runner alive
 const emptyRepo = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ube-flow-'));
@@ -24,7 +24,7 @@ function fakeSession(script = {}) {
 function setup({ phase = 'implement', feature = null, commands } = {}) {
   const events = [];
   const s = fakeSession({ commands });
-  const state = { phase, feature, managerSessionId: null, costs: {} };
+  const state = { phase, feature, managerSessionId: null, runningTotals: {} };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
     state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
@@ -85,7 +85,7 @@ test('next: spec then tickets advance the phase in order and refuse to go backwa
 test('the manager session is seeded from its own prior running total, filed under the plain agent id before any session id is known (legacy, ADR-0001)', async () => {
   const s = fakeSession();
   let seenSeed;
-  const state = { phase: 'implement', feature: null, managerSessionId: null, costs: { manager: { agent: 'manager', usd: 2 } } };
+  const state = { phase: 'implement', feature: null, managerSessionId: null, runningTotals: { manager: { agent: 'manager', usd: 2 } } };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
     state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
@@ -106,7 +106,7 @@ test('the seed is still found once a session.cost event carries `session` (ADR-0
   let seenSeed;
   const state = {
     phase: 'implement', feature: null, managerSessionId: 'sess-1',
-    costs: runningTotals([{ v: 1, t: Date.now(), type: 'session.cost', agent: 'manager', session: 'sess-1', usd: 7 }]),
+    runningTotals: runningTotals([{ v: 1, t: Date.now(), type: 'session.cost', agent: 'manager', session: 'sess-1', usd: 7 }]),
   };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },

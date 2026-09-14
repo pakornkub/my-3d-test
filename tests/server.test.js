@@ -7,7 +7,7 @@ import { parseAgentFile, loadTeam, agentDefinitions } from '../server/team.mjs';
 import { parseTicket, readBoard, claimTicket, setTicketField } from '../server/board.mjs';
 import { parseOffice, renderOffice, commandAllowed, allowlistRules, DEFAULTS } from '../server/office.mjs';
 import { summarizeTool } from '../server/runner.mjs';
-import { runningTotals, runningTotalFor, costEvents, managerRunningTotal, recordCost } from '../server/state.mjs';
+import { runningTotals, runningTotalFor, costEvents, managerRunningTotal, recordCost } from '../server/costs.mjs';
 
 // ---------------------------------------------------------------- team
 test('parseAgentFile reads frontmatter lists and scalars, body becomes the prompt', () => {
@@ -157,9 +157,9 @@ test('runningTotalFor is 0 for an agent with nothing logged', () => {
 });
 
 test('managerRunningTotal is the one lookup flow.mjs and pipeline.mjs both defer to, so they cannot drift apart', () => {
-  const costs = runningTotals([{ type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 3 }]);
-  assert.equal(managerRunningTotal({ costs, managerSessionId: 'sess-A' }), 3);
-  assert.equal(managerRunningTotal({ costs: {}, managerSessionId: null }), 0);
+  const totals = runningTotals([{ type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 3 }]);
+  assert.equal(managerRunningTotal({ runningTotals: totals, managerSessionId: 'sess-A' }), 3);
+  assert.equal(managerRunningTotal({ runningTotals: {}, managerSessionId: null }), 0);
 });
 
 test('costEvents reconstructs the real agent id, not the map key, for a session-keyed entry', () => {
@@ -172,30 +172,33 @@ test('costEvents omits `session` for an agent-keyed (legacy) entry', () => {
   assert.deepEqual(costEvents(costs), [{ agent: 'manager', usd: 2 }]);
 });
 
-test('costEvents drops a legacy agent-keyed entry once that agent also has a session-keyed one, so a newly-connected scene never sums the same running total twice', () => {
-  const costs = runningTotals([
-    { type: 'session.cost', agent: 'manager', usd: 1.5 },                    // stale, pre-upgrade line
-    { type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 4 },   // fresh, same session
+test('costEvents keeps a legacy agent-keyed entry alongside a session-keyed one for a different session, so an earlier session\'s money is never dropped (CONTEXT.md Team cost)', () => {
+  const totals = runningTotals([
+    { type: 'session.cost', agent: 'manager', usd: 1.5 },                    // an earlier, untagged session
+    { type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 4 },   // a later, tagged session
   ]);
-  assert.deepEqual(costEvents(costs), [{ agent: 'manager', usd: 4, session: 'sess-A' }]);
+  assert.deepEqual(costEvents(totals), [
+    { agent: 'manager', usd: 1.5 },
+    { agent: 'manager', usd: 4, session: 'sess-A' },
+  ]);
 });
 
 // ---------------------------------------------------------------- state: day rollover
 test('recordCost starts a fresh bucket the moment an event lands on a new UTC day, discarding the old one (ADR-0002)', () => {
-  const st = { costs: { manager: { agent: 'manager', usd: 3 } }, costsDay: '2026-09-14' };
+  const st = { runningTotals: { manager: { agent: 'manager', usd: 3 } }, runningTotalsDay: '2026-09-14' };
   recordCost(st, { type: 'session.cost', agent: 'manager', usd: 0.2, t: new Date('2026-09-15T00:00:01Z').getTime() });
-  assert.deepEqual(st.costs, { manager: { agent: 'manager', usd: 0.2 } });
-  assert.equal(st.costsDay, '2026-09-15');
+  assert.deepEqual(st.runningTotals, { manager: { agent: 'manager', usd: 0.2 } });
+  assert.equal(st.runningTotalsDay, '2026-09-15');
 });
 
 test('recordCost folds into the same bucket for events on the day it already holds', () => {
-  const st = { costs: { manager: { agent: 'manager', usd: 1 } }, costsDay: '2026-09-15' };
+  const st = { runningTotals: { manager: { agent: 'manager', usd: 1 } }, runningTotalsDay: '2026-09-15' };
   recordCost(st, { type: 'session.cost', agent: 'eng_m1', session: 's1', usd: 0.4, t: new Date('2026-09-15T12:00:00Z').getTime() });
-  assert.deepEqual(st.costs, {
+  assert.deepEqual(st.runningTotals, {
     manager: { agent: 'manager', usd: 1 },
     s1: { agent: 'eng_m1', usd: 0.4, session: 's1' },
   });
-  assert.equal(st.costsDay, '2026-09-15');
+  assert.equal(st.runningTotalsDay, '2026-09-15');
 });
 
 // ---------------------------------------------------------------- runner

@@ -57,11 +57,6 @@ export function make(type, fields = {}) {
   return { v: EVENT_VERSION, t: Date.now(), type, ...fields };
 }
 
-/** Adds `session` to a field set only when present -- the ADR-0001 optional-field guard every session.cost payload needs, so runner.mjs and state.mjs don't each spell it out themselves. */
-export function withSession(fields, session) {
-  return session ? { ...fields, session } : fields;
-}
-
 /** @returns string[] of problems; empty when the event is well-formed. */
 export function validate(ev) {
   const errs = [];
