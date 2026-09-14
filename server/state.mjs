@@ -19,7 +19,7 @@ const EMPTY = () => ({
   phase: 'onboard',
   onboarding: [],          // [{ n, state, detail }]
   jobs: {},                // ticket id -> { agent, sessionId, attempt, status, worktree }
-  costUsd: 0,
+  costs: {},               // session key (`ev.session ?? ev.agent`) -> its latest running total
   updatedAt: null,
 });
 
@@ -49,4 +49,22 @@ export function readLog(projectId, day = new Date().toISOString().slice(0, 10)) 
     return fs.readFileSync(path.join(LOG_DIR, `${projectId}-${day}.jsonl`), 'utf8')
       .split('\n').filter(Boolean).map((l) => JSON.parse(l));
   } catch { return []; }
+}
+
+/**
+ * The day's `session.cost` events reduced to the latest running total per session key
+ * (`ev.session ?? ev.agent`) -- the boot-time seed so a restart never makes the figure
+ * shown to the scene jump backwards. A cost event replaces its key's total rather than
+ * adding to it (ADR-0002); malformed or unrelated entries are skipped, not thrown on.
+ */
+export function runningTotals(events) {
+  const totals = {};
+  for (const ev of events ?? []) {
+    if (!ev || typeof ev !== 'object') continue;
+    if (ev.type !== 'session.cost') continue;
+    const key = ev.session ?? ev.agent;
+    if (!key || typeof ev.usd !== 'number') continue;
+    totals[key] = ev.usd;
+  }
+  return totals;
 }

@@ -23,7 +23,7 @@ function fakeSession(script = {}) {
 function setup({ phase = 'implement', feature = null, commands } = {}) {
   const events = [];
   const s = fakeSession({ commands });
-  const state = { phase, feature, managerSessionId: null, costUsd: 0 };
+  const state = { phase, feature, managerSessionId: null, costs: {} };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
     state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
@@ -79,6 +79,21 @@ test('next: spec then tickets advance the phase in order and refuse to go backwa
   await flow.onNext('onboard'); // backwards to onboard is refused
   assert.equal(state.phase, 'grill');
   assert.ok(s.sent.length >= n);
+});
+
+test('the manager session is seeded from any prior member cost, and a turn folds its result back into state.costs', async () => {
+  const s = fakeSession();
+  let seenSeed;
+  const state = { phase: 'implement', feature: null, managerSessionId: null, costs: { manager: 2 } };
+  const flow = new Flow({
+    project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
+    state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
+    office: null, emit: () => {}, approvals: null, save: () => {},
+    createSession: (opts) => { seenSeed = opts.costSeed; return s; },
+  });
+  await flow.onCommand('อยากได้ X');
+  assert.equal(seenSeed, 2);          // the restart-safe seed reached the new session
+  assert.equal(state.costs.manager, s.costUsd);   // the turn's result replaces this member's figure
 });
 
 test('a message during onboarding is refused without touching the session', async () => {

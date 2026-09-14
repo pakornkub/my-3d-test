@@ -39,11 +39,15 @@ export class Session {
    * @param agent    crew id this session speaks as (manager, eng_m1, ...)
    * @param emit     (event) => void
    * @param onFile   (path) => void after a Write/Edit lands, for docs/board refresh
+   * @param costSeed running total already spent today by this agent (from the day's log),
+   *                 e.g. on a resumed session -- so a restart never makes the figure the
+   *                 scene shows jump backwards (the SDK's own total_cost_usd starts at 0
+   *                 for a fresh process even when resuming an older session)
    * @param options  everything for query(): cwd, model, systemPrompt, agents, allowedTools,
    *                 disallowedTools, permissionMode, canUseTool, settingSources, skills,
    *                 mcpServers, maxTurns, maxBudgetUsd, resume, env
    */
-  constructor({ agent, emit, onFile = () => {}, stallMinutes = 6, timeoutMinutes = 0, ticket = null, options = {} }) {
+  constructor({ agent, emit, onFile = () => {}, stallMinutes = 6, timeoutMinutes = 0, ticket = null, costSeed = 0, options = {} }) {
     this.agent = agent;
     this.emit = emit;
     this.onFile = onFile;
@@ -54,7 +58,8 @@ export class Session {
     this.timedOut = false;
     this.options = options;
     this.sessionId = options.resume ?? null;
-    this.costUsd = 0;
+    this.costSeed = costSeed;
+    this.costUsd = costSeed;
     this.turns = 0;
     this.busy = false;
     this.lastText = '';
@@ -162,7 +167,7 @@ export class Session {
       case 'result': {
         this.turns += msg.num_turns ?? 1;
         if (typeof msg.total_cost_usd === 'number') {
-          this.costUsd = msg.total_cost_usd;
+          this.costUsd = this.costSeed + msg.total_cost_usd;
           this.emit(make('session.cost', { agent: this.agent, usd: this.costUsd, turns: this.turns }));
         }
         if (msg.session_id) this.sessionId = msg.session_id;

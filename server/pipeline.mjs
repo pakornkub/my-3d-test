@@ -439,7 +439,7 @@ export class Pipeline {
       costs[k].sessions += j.attempt ?? 1;
       costs[k].usd += j.usd ?? 0;
     }
-    costs.manager = { sessions: 1, usd: this.state.costUsd ?? 0 };
+    costs.manager = { sessions: 1, usd: this.state.costs?.manager ?? 0 };
     const branch = wt.featureBranch(this.feature);
     const diff = wt.diffStat(this.repo, this.project.mainBranch, branch);
     const prompt = featureReportPrompt({

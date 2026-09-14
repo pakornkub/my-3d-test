@@ -70,6 +70,7 @@ export class Flow {
       emit: this.emit,
       onFile: (p) => this.#onFile(p),
       stallMinutes: Number(policy['stall-minutes'] ?? 6),
+      costSeed: this.state.costs?.manager ?? 0,
       options: {
         cwd: this.repo,
         model: m.model,
@@ -108,7 +109,7 @@ export class Flow {
     this.emit(make('flow.phase', { phase: this.phase, hitl: HITL.has(this.phase), feature: this.state.feature }));
     const res = await s.send(text);
     if (s.sessionId && s.sessionId !== this.state.managerSessionId) { this.state.managerSessionId = s.sessionId; this.save(); }
-    this.state.costUsd = s.costUsd;
+    this.state.costs = { ...this.state.costs, manager: s.costUsd };
     this.save();
     this.refreshBoard();
     if (res?.ended) return res;
@@ -258,7 +259,7 @@ export class Flow {
       tickets: this.state.feature ? readBoard(this.repo, this.state.feature).map(({ file, ...t }) => t) : [],
       teamHash: teamHash(),
       pluginVersion: PLUGIN_VERSION,
-      costUsd: this.state.costUsd,
+      costs: this.state.costs,
     };
   }
 
