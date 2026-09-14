@@ -161,11 +161,11 @@ export class Session {
       }
       case 'result': {
         this.turns += msg.num_turns ?? 1;
+        if (msg.session_id) this.sessionId = msg.session_id;
         if (typeof msg.total_cost_usd === 'number') {
           this.costUsd = msg.total_cost_usd;
-          this.emit(make('session.cost', { agent: this.agent, usd: this.costUsd, turns: this.turns }));
+          this.emit(make('session.cost', { agent: this.agent, usd: this.costUsd, turns: this.turns, session: this.sessionId }));
         }
-        if (msg.session_id) this.sessionId = msg.session_id;
         if (msg.subtype !== 'success') {
           this.emit(make('error', { agent: this.agent, message: `${msg.subtype}: ${SHORT(msg.result ?? msg.errors?.join('; ') ?? '', 200)}` }));
         }

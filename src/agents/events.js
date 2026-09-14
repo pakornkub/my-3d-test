@@ -13,7 +13,7 @@ export const EVENT_VERSION = 1;
 export const SCHEMA = {
   // ---- driver → scene: the connection ----------------------------------------
   'hello':            ['server', 'projects'],             // + project?, phase?, feature?
-  'session.cost':     ['agent', 'usd'],                   // running total for one session
+  'session.cost':     ['agent', 'usd'],                   // running total for one session; + session? (SDK session id)
   // ---- driver → scene: the flow ------------------------------------------------
   'flow.phase':       ['phase'],                          // + hitl?, feature?
   'flow.ask':         ['askId', 'kind', 'text'],          // kind: question | seams | tickets
