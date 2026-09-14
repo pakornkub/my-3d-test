@@ -35,20 +35,22 @@ export function worktreePath(repo, feature, id) {
 }
 
 /**
- * Create (or reuse) the worktree for a ticket. A fresh attempt gets a fresh branch tip:
- * the previous branch is kept as ticket/<slug>-<NN>-attempt<k> for forensics.
+ * Create the worktree for a ticket, or reuse the one that is already there. A retry keeps
+ * the files and commits of the previous attempt: the fresh start is the model's context,
+ * not the working tree (the retry note tells the new session to look at git status/log).
  */
-export function createTicketWorktree(repo, feature, id, { mainBranch = 'main', attempt = 1, install = true, commands = {} } = {}) {
+export function createTicketWorktree(repo, feature, id, { mainBranch = 'main', install = true, commands = {} } = {}) {
   const fb = ensureFeatureBranch(repo, feature, mainBranch);
   const tb = ticketBranch(feature, id);
   const wt = worktreePath(repo, feature, id);
   fs.mkdirSync(path.join(repo, WORKTREES), { recursive: true });
-  if (fs.existsSync(wt)) removeTicketWorktree(repo, feature, id, { keepBranch: false });
-  if (branchExists(repo, tb)) {
-    if (attempt > 1) tryGit(repo, ['branch', '-m', tb, `${tb}-attempt${attempt - 1}`]);
-    else tryGit(repo, ['branch', '-D', tb]);
+  if (fs.existsSync(path.join(wt, '.git'))) {
+    const hasModules = !fs.existsSync(path.join(wt, 'package.json')) || fs.existsSync(path.join(wt, 'node_modules'));
+    if (hasModules) return { path: wt, branch: tb, feature: fb, log: ['reused'], reused: true };
   }
-  git(repo, ['worktree', 'add', '-b', tb, wt, fb]);
+  if (fs.existsSync(wt)) removeTicketWorktree(repo, feature, id, { keepBranch: true });
+  if (branchExists(repo, tb)) git(repo, ['worktree', 'add', wt, tb]);
+  else git(repo, ['worktree', 'add', '-b', tb, wt, fb]);
   const log = [];
   if (install && fs.existsSync(path.join(wt, 'package.json'))) {
     const hasLock = fs.existsSync(path.join(wt, 'package-lock.json'));

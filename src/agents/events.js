@@ -45,6 +45,7 @@ export const SCHEMA = {
   'project.select':   ['project'],
   'project.recheck':  ['project', 'step'],
   'merge':            ['branch'],
+  'ticket.retry':     ['ticket'],                         // put an escalated ticket back on the board
   'cancel':           [],
   'replay':           ['job'],
 };

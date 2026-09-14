@@ -61,3 +61,34 @@ crash leaves it behind: `git worktree remove --force .worktrees/onboard-rehearsa
 
 **Costs.** `session.cost` events carry the SDK's running total; the panel shows it next to the
 mode badge. `daily-budget-usd` in `docs/agents/office.md` becomes `maxBudgetUsd` on every session.
+
+## The ticket pipeline (phase 2)
+
+`pipeline.mjs` starts whenever the phase is `implement` and a feature has tickets. Every
+15 s it takes frontier tickets (blockers done, unclaimed) and gives them to idle
+implementers, up to `max-parallel`. Per ticket:
+
+1. **claim** — `Status: in-progress`, `Assignee:` written into the ticket file
+2. **worktree** — `.worktrees/<feature>-<NN>` on `ticket/<feature>-<NN>`, branched from
+   `feature/<feature>` (created from main on first use); `npm ci` inside; `db:` command if set
+3. **implement** — fresh session, `/implement` + the ticket text; must commit on that branch
+4. **gates** — the server runs `test`, `typecheck`, `e2e` from `docs/agents/office.md`
+5. **review** — reviewer session, `/code-review` against the feature branch
+6. **verify** — QA session; `exploratory` starts the worktree's dev server on
+   `port-base + n` and hands the QA Playwright MCP (`npx @playwright/mcp`, needs
+   `npx playwright install chromium` once); `scripted` runs commands only; `none` skips
+7. **close** — merge `--no-ff` into the feature branch, level-1 report appended to the ticket
+   under `## Comments`, `Status: done`, other open worktrees rebased, ticket worktree removed
+
+Any failure in 4–6 goes back to the same implementer session with the evidence, up to
+`fix-rounds`. A timeout (`ticket-timeout-min`), stall, `RESULT: blocked` or session error
+ends the attempt; up to `attempts` fresh sessions run with a note about the previous one.
+Past that, or on a merge conflict, the ticket becomes `ready-for-human` with the reason
+appended, and the worktree is kept for you.
+
+When no ticket is open the manager writes the level-2 report (validated against the
+template, one retry), the TV shows it with a **merge into main** button, and a PR is opened
+if `gh` is installed and logged in.
+
+`state/<project>.json` → `jobs` holds each ticket's stage, attempt, branch and cost;
+`state/metrics.jsonl` gets one row per closed or escalated ticket.

@@ -154,6 +154,8 @@ export class Session {
             this.emit(make('agent.tool', { agent: this.agent, ticket: this.ticket ?? null, tool: block.name, summary: summarizeTool(block.name, block.input, this.options.cwd) }));
           } else if (block.type === 'text' && block.text?.trim()) {
             this.lastText = block.text.trim();
+            // the account's usage / session limit: not the agent's fault, the caller should pause and retry later
+            if (/hit your (session|usage) limit|usage limit reached|rate limit/i.test(this.lastText)) this.limited = true;
             this.emit(make('agent.say', { agent: this.agent, ticket: this.ticket ?? null, text: this.lastText }));
           }
         }

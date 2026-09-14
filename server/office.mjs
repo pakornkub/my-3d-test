@@ -13,7 +13,7 @@ export const DEFAULTS = {
   worktree: { 'port-base': '3100', 'db-per-worktree': 'none', 'env-template': '' },
   policy: {
     verify: 'scripted',
-    'bash-allowlist': 'npm, npx, node, git status, git diff, git log, git add, git commit',
+    'bash-allowlist': 'cd, npm, npx, node, git status, git diff, git log, git add, git commit, git stash, ls, cat, head, tail, grep, wc, echo, find, dir',
     'daily-budget-usd': '10',
     'stall-minutes': '6',
     'max-turns': '60',

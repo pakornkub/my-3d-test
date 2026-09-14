@@ -30,30 +30,32 @@ const messages = {
   cancel: () => ({ type: 'cancel' }),
 };
 
+let sent = !messages[cmd] || cmd === 'recheck';   // --once may only exit after our own message left the socket
 ws.on('open', () => {
   console.log('connected', url);
   const m = messages[cmd];
-  if (m && cmd !== 'recheck') ws.send(JSON.stringify({ v: 1, t: now(), ...m() }));
+  if (m && cmd !== 'recheck') ws.send(JSON.stringify({ v: 1, t: now(), ...m() }), () => { sent = true; });
 });
+const quit = () => { if (sent) process.exit(0); else setTimeout(quit, 50); };
 
 ws.on('message', (d) => {
   const e = JSON.parse(String(d));
   if (e.type === 'hello') {
     project = e.project;
     console.log('hello', e.server, 'project=', e.project, 'phase=', e.phase, 'feature=', e.feature);
-    if (cmd === 'recheck') ws.send(JSON.stringify({ v: 1, t: now(), ...messages.recheck() }));
+    if (cmd === "recheck") ws.send(JSON.stringify({ v: 1, t: now(), ...messages.recheck() }), () => { sent = true; });
     return;
   }
   if (e.type === 'project.status') {
     project = e.project;
     console.log(`project.status ${e.project} ${e.ready ? 'READY' : ''}`);
     for (const s of e.steps) console.log(`   ${s.n} ${s.state.padEnd(7)} ${s.title}${s.detail ? ' — ' + s.detail : ''}`);
-    if (once && e.ready) process.exit(0);
+    if (once && e.ready) quit();
     return;
   }
   const extra = e.text ?? e.summary ?? e.message ?? e.phase ?? e.path ?? (e.tickets ? `${e.tickets.length} tickets` : '');
   console.log(`${e.type}${e.agent ? ' [' + e.agent + ']' : ''}${e.askId ? ' askId=' + e.askId : ''} ${String(extra).replace(/\s+/g, ' ').slice(0, 300)}`);
-  if (once && ['agent.say', 'flow.ask', 'error'].includes(e.type)) process.exit(0);
+  if (once && ["agent.say", "flow.ask", "error"].includes(e.type)) quit();
 });
 
 ws.on('error', (e) => { console.error('cannot connect:', e.message); process.exit(1); });

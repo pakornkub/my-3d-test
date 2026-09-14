@@ -22,6 +22,7 @@ import { runGates } from './gates.mjs';
 import { ticketReport, validateReport, featureReportPrompt } from './report.mjs';
 import * as wt from './worktree.mjs';
 import { STATE_DIR } from './state.mjs';
+import { readOffice } from './office.mjs';
 
 const IMPLEMENTERS = ['eng_m1', 'eng_f1', 'eng_m2'];
 const REVIEWER = 'eng_f2';
@@ -108,6 +109,27 @@ export function pickImplementer(ticketText, idle) {
   return best?.id ?? null;
 }
 
+/**
+ * The browser Playwright MCP should drive: its own Chromium when `npx playwright install
+ * chromium` succeeded, else the machine's Chrome or Edge (the CDN download is not always
+ * reachable). null when nothing usable is installed.
+ */
+export function qaBrowser() {
+  try {
+    const { chromium } = require_('playwright');
+    if (fs.existsSync(chromium.executablePath())) return 'chromium';
+  } catch { /* playwright not installed */ }
+  const candidates = [
+    ['chrome', ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe', '/usr/bin/google-chrome', '/Applications/Google Chrome.app']],
+    ['msedge', ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe']],
+  ];
+  for (const [name, paths] of candidates) if (paths.some((p) => fs.existsSync(p))) return name;
+  return null;
+}
+
+import { createRequire } from 'node:module';
+const require_ = createRequire(import.meta.url);
+
 class Mutex {
   constructor() { this.p = Promise.resolve(); }
   run(fn) { const r = this.p.then(fn, fn); this.p = r.catch(() => {}); return r; }
@@ -146,6 +168,29 @@ export class Pipeline {
     this.timer = setInterval(() => this.tick(), 15_000);
   }
 
+  /** Stop handing out tickets for a while (usage limit). Running jobs park themselves via pauseFor. */
+  pause(why, minutes = 15) {
+    if (this.pausedUntil && this.pausedUntil > Date.now()) return;
+    this.pausedUntil = Date.now() + minutes * 60_000;
+    this.emit(make('agent.say', { agent: 'manager', text: `หยุดพัก ${minutes} นาที: ${why} จะลองต่อเอง` }));
+    this.emit(make('error', { message: `pipeline paused: ${why}` }));
+  }
+
+  /** Put an escalated ticket back on the board, resuming at review when its work is already committed. */
+  requeue(id) {
+    const t = this.board().find((x) => x.id === id);
+    if (!t) return false;
+    const st = this.state.jobs[id] ?? (this.state.jobs[id] = { attempt: 0, usd: 0 });
+    const hasCommits = wt.ticketCommits(this.repo, this.feature, id).length > 0;
+    st.stage = 'pending'; st.attempt = 0; st.resumeStage = hasCommits ? 'review' : 'implement'; delete st.reason;
+    setTicketField(t.file, 'Status', 'in-progress');
+    this.save();
+    this.emit(make('agent.say', { agent: 'manager', text: `ใบ ${id} กลับเข้าบอร์ด เริ่มที่ขั้น ${st.resumeStage}` }));
+    this.emitBoard();
+    this.tick();
+    return true;
+  }
+
   async stop() {
     this.active = false;
     clearInterval(this.timer);
@@ -158,6 +203,9 @@ export class Pipeline {
     for (const [id, job] of Object.entries(this.state.jobs ?? {})) {
       if (job.stage && job.stage !== 'done' && job.stage !== 'escalated') {
         job.resume = `server restart ระหว่างขั้น ${job.stage} รอบ ${job.attempt}: worktree อาจมีงานค้าง ดู git status/log ก่อน`;
+        // a restart is not the ticket's failure: the re-run keeps the same attempt number
+        if (job.stage !== 'pending') { job.attempt = Math.max(0, (job.attempt ?? 1) - 1); }
+        if (['review', 'verify', 'gates', 'close'].includes(job.stage)) job.resumeStage = 'review';
         job.stage = 'pending';
         this.save();
       }
@@ -173,6 +221,7 @@ export class Pipeline {
   /** Assign frontier tickets to idle implementers, up to max-parallel. */
   tick() {
     if (!this.active || !this.feature) return;
+    if (this.pausedUntil && this.pausedUntil > Date.now()) return;
     const tickets = this.board();
     const done = new Set(tickets.filter((t) => t.status === 'done').map((t) => t.id));
     const maxPar = num(this.policy['max-parallel'], 2);
@@ -206,8 +255,9 @@ export class Pipeline {
     const maxAttempts = num(this.policy.attempts, 2);
     if (st.attempt > maxAttempts) { this.#escalate(t, `เกิน ${maxAttempts} รอบ`); return; }
     const note = st.resume ?? st.retryNote ?? null;
-    delete st.resume; delete st.retryNote;
-    st.stage = 'implement';
+    const startAt = st.resumeStage ?? 'implement';     // 'review' / 'verify': skip straight to the fix loop
+    delete st.resume; delete st.retryNote; delete st.resumeStage;
+    st.stage = startAt;
     this.save();
 
     claimTicket(t.file, agent);
@@ -215,43 +265,69 @@ export class Pipeline {
     this.emitBoard();
 
     // worktree from the feature branch (a retry keeps the previous branch tip for forensics)
-    const w = wt.createTicketWorktree(this.repo, this.feature, id, { mainBranch: this.project.mainBranch, attempt: st.attempt, commands: this.commands });
+    const w = wt.createTicketWorktree(this.repo, this.feature, id, { mainBranch: this.project.mainBranch, commands: this.commands });
     st.branch = w.branch; st.worktree = w.path; this.save();
 
     if (st.attempt > 1) this.emit(make('agent.retry', { agent, ticket: id, attempt: st.attempt, note: note ?? 'เริ่มรอบใหม่' }));
     this.emit(make('agent.start', { agent, ticket: id, brief: t.title, mode: 'implement', attempt: st.attempt, teamHash: this.state.teamHash ?? null }));
 
     const ticketText = fs.readFileSync(t.file, 'utf8');
-    const session = this.#session(agent, { cwd: w.path, ticket: id, role: 'impl' });
-    job.session = session;
-    session.start();
     const t0 = Date.now();
-
-    const implementPrompt = [
-      this.#skill('implement'),
-      '',
+    // the implementer session is created on first use: a ticket resumed at review may never need one
+    let session = null;
+    const header = [
       `## Ticket ${id}: ${t.title}`,
       `ไฟล์ ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')}`,
       `spec: .scratch/${this.feature}/spec.md`,
       `worktree นี้อยู่บน branch ${w.branch} (แตกจาก ${w.feature}) commit ที่นี่เท่านั้น ห้าม push`,
-      note ? `\nหมายเหตุจากรอบก่อน: ${note}` : '',
-      '',
-      ticketText,
     ].join('\n');
-    let res = await session.send(implementPrompt);
-    let parsed = parseImplementResult(session.lastText);
-    if (res?.ended || session.timedOut || res?.subtype?.startsWith('error')) {
-      st.retryNote = `รอบ ${st.attempt} ${session.timedOut ? 'หมดเวลา' : 'session จบผิดปกติ'} ข้อความสุดท้าย: ${tail(session.lastText, 300)}`;
-      session.close();
-      this.save();
-      return this.#retryOrEscalate(t, agent, job);
-    }
-    this.emit(make('agent.done', { agent, ticket: id, result: parsed.result, summary: parsed.evidence || parsed.what.join(' · ') || '(ไม่มีสรุป)' }));
-    if (parsed.result !== 'done') {
-      st.retryNote = `รอบ ${st.attempt} รายงาน ${parsed.result}: ${parsed.next || tail(session.lastText, 300)}`;
-      session.close();
-      this.save();
-      return this.#retryOrEscalate(t, agent, job);
+    const impl = () => {
+      if (session) return session;
+      session = this.#session(agent, { cwd: w.path, ticket: id, role: 'impl' });
+      job.session = session;
+      session.start();
+      return session;
+    };
+    const limited = (sess) => sess?.limited;
+    const pauseFor = (stage, why) => {
+      // the account's usage limit, not the ticket's fault: park the job at this stage and try later
+      st.resumeStage = stage; st.stage = 'pending'; st.attempt -= 1; this.save();
+      session?.close();
+      this.pause(why);
+    };
+
+    let res, parsed;
+    if (startAt === 'implement') {
+      const implementPrompt = [
+        this.#skill('implement'),
+        '',
+        header,
+        w.reused ? 'worktree นี้มีงานจากรอบก่อนอยู่แล้ว: ดู git status และ git log ก่อน อย่าเริ่มใหม่จากศูนย์' : '',
+        note ? `\nหมายเหตุจากรอบก่อน: ${note}` : '',
+        '',
+        ticketText,
+      ].join('\n');
+      res = await impl().send(implementPrompt);
+      parsed = parseImplementResult(session.lastText);
+      if (limited(session)) return pauseFor('implement', 'implementer hit the usage limit');
+      if (res?.ended || session.timedOut || res?.subtype?.startsWith('error')) {
+        st.retryNote = `รอบ ${st.attempt} ${session.timedOut ? 'หมดเวลา' : 'session จบผิดปกติ'} ข้อความสุดท้าย: ${tail(session.lastText, 300)}`;
+        session.close();
+        this.save();
+        return this.#retryOrEscalate(t, agent, job);
+      }
+      this.emit(make('agent.done', { agent, ticket: id, result: parsed.result, summary: parsed.evidence || parsed.what.join(' · ') || '(ไม่มีสรุป)' }));
+      if (parsed.result !== 'done') {
+        st.retryNote = `รอบ ${st.attempt} รายงาน ${parsed.result}: ${parsed.next || tail(session.lastText, 300)}`;
+        session.close();
+        this.save();
+        return this.#retryOrEscalate(t, agent, job);
+      }
+    } else {
+      // resumed after the implementer already committed: the commits are the summary
+      const commits = wt.ticketCommits(this.repo, this.feature, id).map((c) => c.replace(/^\S+\s+/, ''));
+      parsed = { result: 'done', evidence: '', next: '', what: commits.length ? commits : ['(resumed at ' + startAt + ')'] };
+      this.emit(make('agent.say', { agent, ticket: id, text: `ใบ ${id} กลับมาที่ขั้น ${startAt} (งาน commit ไว้แล้ว ${commits.length} ครั้ง)` }));
     }
 
     // ---- fix loop: gates -> review -> verify, each failure goes back to the same session
@@ -267,11 +343,13 @@ export class Pipeline {
       } else {
         st.stage = 'review'; this.save();
         review = await this.#review(t, w);
+        if (review.limited) return pauseFor('review', 'reviewer hit the usage limit');
         if (review.verdict !== 'pass') {
           feedback = `reviewer ส่งกลับ:\nSTANDARDS: ${review.standards.join('; ') || 'none'}\nSPEC: ${review.spec.join('; ') || 'none'}\n\nแก้ตาม finding แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
         } else if (this.policy.verify !== 'none') {
           st.stage = 'verify'; this.save();
           verify = await this.#verify(t, w);
+          if (verify.limited) return pauseFor('verify', 'QA hit the usage limit');
           if (verify.verdict !== 'pass') {
             feedback = `QA ตรวจรับไม่ผ่าน (${verify.criteria.filter((c) => !c.pass).length} ข้อ):\n` + verify.criteria.filter((c) => !c.pass).map((c) => `- ${c.text}${c.note ? ' — ' + c.note : ''}`).join('\n') + `\n\nREPRO: ${verify.repro || '-'}\n\nแก้แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
           }
@@ -281,16 +359,18 @@ export class Pipeline {
       rounds += 1;
       if (rounds > maxRounds) {
         st.retryNote = `แก้ ${maxRounds} รอบแล้วยังไม่ผ่าน: ${tail(feedback, 300)}`;
-        session.close();
+        session?.close();
         this.save();
         return this.#retryOrEscalate(t, agent, job);
       }
       this.emit(make('agent.start', { agent, ticket: id, brief: `${t.title} (แก้รอบ ${rounds})`, mode: 'implement', attempt: st.attempt }));
       st.stage = 'implement'; this.save();
-      res = await session.send(feedback);
+      const fresh = !session;
+      res = await impl().send((fresh ? header + '\nworktree นี้มีงานที่ commit ไว้แล้ว ดู git log ก่อน\n\n' : '') + feedback);
       parsed = parseImplementResult(session.lastText);
-      if (res?.ended || session.timedOut) {
-        st.retryNote = `รอบแก้ ${rounds} ${session.timedOut ? 'หมดเวลา' : 'session จบผิดปกติ'}`;
+      if (limited(session)) return pauseFor(review && review.verdict !== 'pass' ? 'review' : 'gates', 'implementer hit the usage limit');
+      if (res?.ended || session.timedOut || res?.subtype?.startsWith('error')) {
+        st.retryNote = `รอบแก้ ${rounds} ${session.timedOut ? 'หมดเวลา' : res?.subtype ?? 'session จบผิดปกติ'} (งานล่าสุด: ${tail(session.lastText, 200)})`;
         session.close();
         this.save();
         return this.#retryOrEscalate(t, agent, job);
@@ -300,20 +380,20 @@ export class Pipeline {
 
     // ---- close: merge, report, board
     st.stage = 'close'; this.save();
-    const usd = session.costUsd + (review?.usd ?? 0) + (verify?.usd ?? 0);
+    const usd = (st.usd ?? 0) + (session?.costUsd ?? 0) + (review?.usd ?? 0) + (verify?.usd ?? 0);
     st.usd = usd;
     const commits = wt.ticketCommits(this.repo, this.feature, id);
     if (!commits.length) {
       // nothing committed: ask once for a commit, then escalate
-      await session.send('ยังไม่มี commit บน branch นี้ ให้ git add และ git commit งานทั้งหมดตอนนี้ แล้วตอบสั้นๆ');
+      await impl().send(header + '\n\nยังไม่มี commit บน branch นี้ ให้ git add และ git commit งานทั้งหมดตอนนี้ แล้วตอบสั้นๆ');
       if (!wt.ticketCommits(this.repo, this.feature, id).length) {
-        session.close();
+        session?.close();
         return this.#escalate(t, 'implementer ไม่ได้ commit งาน');
       }
     }
     const merge = wt.mergeTicket(this.repo, this.feature, id, { mainBranch: this.project.mainBranch, message: `Merge ticket ${id}: ${t.title}` });
     if (!merge.ok) {
-      session.close();
+      session?.close();
       return this.#escalate(t, `merge เข้า ${wt.featureBranch(this.feature)} ชนกันที่: ${merge.files.join(', ') || merge.error}`);
     }
     const diff = wt.diffStat(this.repo, this.project.mainBranch, wt.featureBranch(this.feature));
@@ -335,7 +415,7 @@ export class Pipeline {
     st.stage = 'done'; st.finishedAt = Date.now(); this.save();
     this.#metrics({ ticket: id, agent, attempts: st.attempt, rounds, gates: gates.map((g) => [g.gate, g.pass]), review: review?.verdict, verify: verify?.verdict, ms: Date.now() - t0, usd, escalated: false });
     this.emit(make('ticket.closed', { ticket: id, assignee: agent, report, diffStat: diff }));
-    session.close();
+    session?.close();
     this.emitBoard();
     // keep the others current with what just landed
     const open = this.board().filter((x) => x.status === 'in-progress').map((x) => x.id);
@@ -357,12 +437,24 @@ export class Pipeline {
         `fixed point: ${w.feature} (git diff ${w.feature}...HEAD)`,
         `spec: .scratch/${this.feature}/spec.md · ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')}`,
         'มาตรฐานของ repo: CLAUDE.md, CONTEXT.md, docs/adr/',
-        'ห้ามแก้โค้ด รายงานอย่างเดียว จบด้วยสามบรรทัด VERDICT / STANDARDS / SPEC ตาม prompt ประจำตัวของคุณ',
+        'ห้ามแก้โค้ด รายงานอย่างเดียว ถ้าแตกงานให้ sub-agent ให้รอผลก่อนตอบ (ห้ามใช้ background agent) แล้วจบด้วยสามบรรทัด VERDICT / STANDARDS / SPEC ตาม prompt ประจำตัวของคุณ',
       ].join('\n');
       await s.send(prompt);
-      const r = parseReviewResult(s.lastText);
+      // the review skill fans out to sub-agents; if the reviewer ended its turn while they were
+      // still running, their results land as later assistant messages in the same session, so
+      // wait for a verdict line before judging, then ask for it once
+      const hasVerdict = () => /VERDICT:/i.test(s.lastText);
+      const waitFor = async (ms) => { const t0 = Date.now(); while (!hasVerdict() && !s.limited && !s.closed && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 10_000)); };
+      if (!hasVerdict() && !s.limited) await waitFor(8 * 60_000);
+      if (!hasVerdict() && !s.limited) {
+        await s.send('รวมผลจาก sub-agent ทั้งสองแกน (รอให้เสร็จ ห้ามจบ turn ก่อน) แล้วจบด้วยสามบรรทัดเท่านั้น: VERDICT: pass|fail / STANDARDS: … หรือ none / SPEC: … หรือ none');
+        if (!hasVerdict() && !s.limited) await waitFor(6 * 60_000);
+      }
+      const r = /VERDICT:/i.test(s.lastText) ? parseReviewResult(s.lastText) : { verdict: 'fail', standards: [], spec: ['reviewer ไม่ได้ให้ verdict: ' + tail(s.lastText, 200)] };
       r.usd = s.costUsd;
+      r.limited = !!s.limited;
       s.close();
+      if (r.limited) return r;
       this.emit(make('review.result', { agent: REVIEWER, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, standards: r.standards, spec: r.spec, verdict: r.verdict }));
       return r;
     });
@@ -378,7 +470,9 @@ export class Pipeline {
         dev = await wt.startDevServer(this.commands.dev, w.path, port);
         if (!dev) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `dev server ไม่ขึ้นที่ :${port} ตรวจได้เฉพาะแบบ scripted` }));
       }
-      const mcp = exploratory ? { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless', '--browser', 'chromium'] } } : undefined;
+      const browser = qaBrowser();
+      if (exploratory && !browser) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: 'ไม่พบเบราว์เซอร์สำหรับ Playwright (chromium/chrome/msedge) ตรวจได้เฉพาะแบบ scripted' }));
+      const mcp = exploratory && browser ? { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless', '--browser', browser] } } : undefined;
       const s = this.#session(QA, { cwd: w.path, ticket: t.id, role: 'qa', mcp });
       s.start();
       const criteria = t.criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
@@ -393,13 +487,17 @@ export class Pipeline {
         '',
         'ทำทีละข้อ เก็บหลักฐานลง .scratch/' + this.feature + '/issues/' + t.id + '/verify/ (สร้างโฟลเดอร์ได้)',
         'ข้อที่ต้องใช้เบราว์เซอร์แต่ไม่มีเบราว์เซอร์ให้ตอบ skip พร้อมเหตุผล ไม่ใช่ fail',
+        'Office Server ที่ ws://localhost:5181 รันโค้ดของ branch หลัก ไม่ใช่ของ worktree นี้: ข้อที่ต้องให้ server ส่งข้อมูลใหม่จาก diff นี้ (เช่น field ใหม่ใน hello/snapshot) หรือต้องหยุด server นั้น ให้ตอบ skip พร้อมเหตุผล ห้ามนับเป็น fail และห้ามหยุดหรือรบกวน server ที่ใช้ร่วมกัน',
+        'อย่าแก้ไฟล์ของโปรเจกต์เพื่อทดสอบ ถ้าข้อไหนต้องแก้ไฟล์นอก .scratch ให้ตอบ skip',
         'จบด้วยบรรทัดต่อข้อ "CRITERION n: pass|fail|skip — หลักฐานสั้นๆ" แล้วตามด้วย VERDICT / CRITERIA / REPRO (VERDICT เป็น fail เมื่อมีข้อใด fail)',
       ].join('\n');
       await s.send(prompt);
       const r = parseVerifyResult(s.lastText, t.criteria);
       r.usd = s.costUsd;
+      r.limited = !!s.limited;
       s.close();
       dev?.stop();
+      if (r.limited) return r;
       this.emit(make('verify.result', { agent: QA, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, criteria: r.criteria, verdict: r.verdict, repro: r.repro }));
       return r;
     });
@@ -463,6 +561,7 @@ export class Pipeline {
 
   // ---------------------------------------------------------------- helpers
   #session(agent, { cwd, ticket, role, mcp }) {
+    this.office = readOffice(this.repo) ?? this.office;   // policy edits apply to the next session, no restart
     const a = this.team[agent];
     const pol = this.policy;
     const preload = (a.skills ?? []).map((s) => {
@@ -481,7 +580,7 @@ export class Pipeline {
         settingSources: ['user', 'project'],
         allowedTools: allowed,
         permissionMode: 'default',
-        canUseTool: this.approvals.canUseToolFor({ agent, repo: cwd, policy: pol, role, ticket }),
+        canUseTool: this.approvals.canUseToolFor({ agent, repo: cwd, policy: pol, role, ticket, policyRepo: this.repo }),
         maxTurns: num(pol['max-turns'], 60),
         maxBudgetUsd: num(pol['ticket-budget-usd'], 4),
         ...(mcp ? { mcpServers: mcp } : {}),

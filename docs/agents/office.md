@@ -16,7 +16,9 @@ env-template:
 
 ## Policy
 verify: exploratory    # none | scripted | exploratory
-bash-allowlist: npm, npx, node, git status, git diff, git log, git add, git commit    # คั่นด้วย , จับคู่ตามคำขึ้นต้น
+bash-allowlist: cd, npm, npx, node, git status, git diff, git log, git add, git commit, git stash, ls, cat, head, tail, grep, wc, echo, find, dir    # คั่นด้วย , จับคู่ตามคำขึ้นต้น
 daily-budget-usd: 10
 stall-minutes: 6
 max-turns: 60
+ticket-budget-usd: 6
+attempts: 2

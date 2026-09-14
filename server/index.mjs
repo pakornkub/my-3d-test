@@ -171,6 +171,9 @@ async function handle(msg, ws) {
     case 'flow.next':
       flow?.onNext(msg.phase).then(() => maybeStartPipeline()).catch((e) => broadcast(make('error', { message: e.message })));
       break;
+    case 'ticket.retry':
+      if (!pipeline?.requeue(msg.ticket)) broadcast(make('error', { message: 'ไม่พบใบ ' + msg.ticket }));
+      break;
     case 'merge': {
       if (!project || !st.feature) break;
       const r = mergeFeatureToMain(project.path, st.feature, project.mainBranch);
@@ -217,6 +220,14 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify(projectStatus()));
     ws.send(JSON.stringify(make('flow.phase', { phase: st.phase, feature: st.feature })));
     if (flow) ws.send(JSON.stringify(make('board.update', { feature: st.feature, tickets: flow.snapshot().tickets })));
+    // people already at work: a fresh scene must seat them, so these are not marked replayed
+    for (const [id, job] of pipeline?.running ?? []) {
+      const stage = st.jobs?.[id]?.stage ?? 'implement';
+      const mode = stage === 'review' ? 'review' : stage === 'verify' ? 'verify' : 'implement';
+      const who = mode === 'review' ? 'eng_f2' : mode === 'verify' ? 'eng_m3' : job.agent;
+      ws.send(JSON.stringify(make('agent.start', { agent: job.agent, ticket: id, brief: `ใบ ${id} (กำลังทำอยู่)`, mode: 'implement' })));
+      if (who !== job.agent) ws.send(JSON.stringify(make('agent.start', { agent: who, ticket: id, brief: `ใบ ${id} (${mode})`, mode })));
+    }
     // the recent conversation, so a reloaded scene is not blank
     const recent = state.readLog(project.id).filter((e) => ['agent.say', 'flow.ask', 'docs.update', 'ticket.closed', 'feature.report'].includes(e.type)).slice(-40);
     for (const ev of recent) ws.send(JSON.stringify({ ...ev, replayed: true }));

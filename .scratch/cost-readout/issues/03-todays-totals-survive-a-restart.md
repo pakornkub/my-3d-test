@@ -1,8 +1,12 @@
 # 03: Today's totals survive a server restart
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 **Blocked by:** none
+
+**Attempt:** 1
+
+**Assignee:** eng_f1
 
 **What to build:** The server side of the day's accounting: a pure function that turns a day's event log into the latest running total per session, a per-member state map replacing the single scalar, and a seed at boot so a restart never makes a figure jump backwards.
 
@@ -24,3 +28,20 @@
 - [ ] Reloading the browser tab without restarting the server leaves the figure unchanged
 - [ ] `server/state/<project>.json` holds a per-member map after a turn, and a state file from before this change (single `costUsd`) still loads without error
 - [ ] Deleting today's log file and restarting starts the day's figure at zero without error
+
+## Comments
+
+> *ส่งต่อให้คนโดย Office Server*
+
+แก้ 3 รอบแล้วยังไม่ผ่าน: reviewer ส่งกลับ:
+STANDARDS: none
+SPEC: none
+
+แก้ตาม finding แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง
+
+> *ส่งต่อให้คนโดย Office Server*
+
+แก้ 3 รอบแล้วยังไม่ผ่าน: …ost; ชื่อ costFields ไม่อยู่ในคำศัพท์ CONTEXT.md; today()/dayOf() ซ้ำกัน; broadcast() รับงานบัญชีเงินเพิ่ม (Divergent Change); lookup ซ้ำใน runningTotalFor
+SPEC: `.scratch/cost-readout/spec.md` · ticket: `03-todays-totals-survive-a-restart.md`
+
+แก้ตาม finding แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง

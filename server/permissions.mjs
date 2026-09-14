@@ -7,7 +7,7 @@
 
 import path from 'node:path';
 import { make } from '../src/agents/events.js';
-import { allowlistRules, commandAllowed } from './office.mjs';
+import { allowlistRules, commandAllowed, readOffice } from './office.mjs';
 
 const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit', 'Glob', 'Grep']);
 const FREE_TOOLS = new Set(['Skill', 'TodoWrite', 'WebSearch', 'WebFetch', 'Agent', 'Task', 'AskUserQuestion']);
@@ -73,8 +73,10 @@ export class Approvals {
    * @param policy  office.md policy section
    * @param role    manager | impl | review | qa
    */
-  canUseToolFor({ agent, repo, policy, role, ticket = null }) {
-    const rules = allowlistRules(policy);
+  canUseToolFor({ agent, repo, policy, role, ticket = null, policyRepo = repo }) {
+    // the allowlist is read from docs/agents/office.md on every Bash call, so editing the
+    // file takes effect for sessions already running
+    const rules = () => allowlistRules(readOffice(policyRepo)?.policy ?? policy);
     const inside = (p) => {
       if (!p) return true;
       const abs = path.resolve(repo, String(p));
@@ -109,8 +111,8 @@ export class Approvals {
         const cmd = String(input?.command ?? '');
         if (role === 'manager' && !/^\s*(git (status|log|diff|show)|gh (issue|pr) (list|view))\b/.test(cmd))
           return deny('ผู้จัดการใช้ Bash ได้เฉพาะ git status/log/diff/show และ gh อ่านอย่างเดียว');
-        if (commandAllowed(cmd, rules)) return allow();
-        const ok = await this.ask({ agent, tool: 'Bash', summary: cmd.slice(0, 160), ticket,
+        if (commandAllowed(cmd, rules())) return allow();
+        const ok = await this.ask({ agent, tool: 'Bash', summary: cmd.slice(0, 800), ticket,
           reason: 'อยู่นอก allowlist ของโปรเจกต์ (docs/agents/office.md)' });
         return ok ? allow() : deny('มนุษย์ไม่อนุมัติคำสั่งนี้');
       }
