@@ -306,6 +306,8 @@ export class Director {
     this.panel.tv?.({ title: `รายงานปิดงาน: ${ev.feature}`, markdown: ev.report });
   }
 
+  on_session_cost(ev) { this.panel.cost?.(ev); }
+
   on_ci_status(ev) {
     this.panel.transcript?.({ agent: 'manager', kind: ev.state === 'success' ? 'done' : 'warn', text: `CI ${ev.state}: ${ev.pr}` });
   }

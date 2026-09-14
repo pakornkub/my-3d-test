@@ -12,6 +12,11 @@ const base = process.env.GITHUB_ACTIONS ? '/my-3d-test/' : '/';
 export default defineConfig({
   base,
   publicDir: 'export',
-  server: { open: true },
+  server: {
+    open: true,
+    // the scene talks to the Office Server (server/index.mjs) over one WebSocket path, so the
+    // browser only ever sees the Vite origin -- no CORS, no second port to remember
+    proxy: { '/office': { target: 'ws://localhost:5181', ws: true, rewriteWsOrigin: true } },
+  },
   build: { outDir: 'dist', assetsInlineLimit: 0 },
 });

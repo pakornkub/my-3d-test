@@ -2,3 +2,9 @@ node_modules/
 dist/
 __pycache__/
 *.blend1
+server/state/
+server/log/
+server/projects.json
+projects/
+.worktrees/
+*.log

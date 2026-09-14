@@ -13,7 +13,9 @@ const COLS = [
   ['review', 'รีวิว'], ['verify', 'ตรวจรับ'], ['done', 'เสร็จ'], ['needs-human', 'ต้องให้คน'],
 ];
 
-export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock, onTab }) {
+const NEXT_OF = { grill: ['spec', 'เขียนสเปก'], spec: ['tickets', 'แตกเป็น ticket'], tickets: ['implement', 'ให้ทีมลงมือ'], implement: ['done', 'ปิดงาน'] };
+
+export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock, onTab, onNext, onProjectAdd, onProjectSelect, onRecheck, onCancel }) {
   const root = document.getElementById('panel');
   const tabs = root.querySelector('.tabs');
   const sections = Object.fromEntries([...root.querySelectorAll('section[data-tab]')].map((s) => [s.dataset.tab, s]));
@@ -76,7 +78,15 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
   root.querySelector('.panel-close').addEventListener('click', close);
 
   // ---------------------------------------------------------------- phase strip
-  function phase(p) {
+  const phaseBar = sections.chat.querySelector('.phase-actions');
+  let currentPhase = 'onboard';
+  let live = false;
+  function phase(p, ev = {}) {
+    if (p !== currentPhase && askEl.dataset.askId) {   // a question from the previous phase is moot now
+      askEl.hidden = true;
+      askEl.dataset.askId = '';
+    }
+    currentPhase = p;
     phaseStrip.replaceChildren(...PHASES.map((k) => {
       const s = document.createElement('span');
       s.textContent = PHASE_LABEL[k];
@@ -84,13 +94,38 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
       s.className = i < c ? 'past' : i === c ? 'now' : '';
       return s;
     }));
+    renderPhaseActions(ev.feature);
+  }
+  function renderPhaseActions(feature) {
+    phaseBar.innerHTML = '';
+    if (!live) { phaseBar.hidden = true; return; }
+    phaseBar.hidden = false;
+    const next = NEXT_OF[currentPhase];
+    const idle = currentPhase === 'implement' && !feature;
+    if (next && !idle) {
+      const b = document.createElement('button');
+      b.className = 'primary';
+      b.textContent = next[1] + ' →';
+      b.addEventListener('click', () => onNext?.(next[0]));
+      phaseBar.appendChild(b);
+    }
+    const stop = document.createElement('button');
+    stop.textContent = 'หยุดผู้จัดการ';
+    stop.addEventListener('click', () => onCancel?.());
+    phaseBar.appendChild(stop);
+    if (idle) {
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.textContent = 'พิมพ์ไอเดียใหม่เพื่อเริ่มสัมภาษณ์';
+      phaseBar.appendChild(hint);
+    }
   }
   phase('onboard');
 
   // ---------------------------------------------------------------- transcript
-  function transcript({ agent, kind = 'say', text, who }) {
+  function transcript({ agent, kind = 'say', text, who, replayed = false }) {
     const row = document.createElement('div');
-    row.className = 'msg ' + kind;
+    row.className = 'msg ' + kind + (replayed ? ' replayed' : '');
     const name = who ?? (agent === 'you' ? 'คุณ' : labels[agent] ?? agent);
     const role = agent && ROLE[agent] ? ROLE_LABEL[ROLE[agent]] : '';
     row.innerHTML = `<span class="who"></span><span class="txt"></span>`;
@@ -123,27 +158,63 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
       }
       askEl.appendChild(ul);
     }
+    // multiple choice (the model's AskUserQuestion): one row of option buttons per question
+    const picks = {};
+    if (ev.kind === 'choice' && Array.isArray(ev.questions)) {
+      h.hidden = true;
+      for (const q of ev.questions) {
+        const box = document.createElement('div');
+        box.className = 'choice';
+        box.innerHTML = `<p class="q"><small></small> <span></span></p><div class="opts"></div>`;
+        box.querySelector('small').textContent = q.header ?? '';
+        box.querySelector('span').textContent = q.question;
+        const opts = box.querySelector('.opts');
+        for (const o of q.options ?? []) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.innerHTML = `<b></b><i></i>`;
+          b.querySelector('b').textContent = o.label;
+          b.querySelector('i').textContent = o.description ?? '';
+          b.addEventListener('click', () => {
+            if (q.multiSelect) {
+              b.classList.toggle('on');
+              picks[q.question] = [...opts.querySelectorAll('button.on b')].map((x) => x.textContent).join(', ');
+            } else {
+              for (const x of opts.children) x.classList.toggle('on', x === b);
+              picks[q.question] = o.label;
+            }
+          });
+          opts.appendChild(b);
+        }
+        askEl.appendChild(box);
+      }
+    }
     const form = document.createElement('form');
-    form.innerHTML = `<input type="text" placeholder="${ev.kind === 'question' ? 'พิมพ์คำตอบ…' : 'ความเห็นเพิ่มเติม (ไม่บังคับ)'}" />`
-      + `<button type="submit" class="primary">${ev.kind === 'question' ? 'ตอบ' : 'อนุมัติ'}</button>`;
+    const isQ = ev.kind === 'question' || ev.kind === 'choice';
+    form.innerHTML = `<input type="text" placeholder="${ev.kind === 'choice' ? 'หรือพิมพ์คำตอบเอง…' : isQ ? 'พิมพ์คำตอบ…' : 'ความเห็นเพิ่มเติม (ไม่บังคับ)'}" />`
+      + `<button type="submit" class="primary">${isQ ? 'ตอบ' : 'อนุมัติ'}</button>`;
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = form.querySelector('input').value.trim();
-      answerAsk(ev.askId, { text, approved: ev.kind !== 'question' });
+      const answers = Object.keys(picks).length ? { ...picks } : undefined;
+      if (ev.kind === 'choice' && !answers && !text) return;
+      answerAsk(ev.askId, { text: text || Object.values(picks).join(' · '), approved: !isQ, answers });
     });
     askEl.appendChild(form);
     setTimeout(() => form.querySelector('input').focus(), 50);
-    transcript({ agent: 'manager', kind: 'ask', text: ev.text });
+    // the live server emits the same text as agent.say just before the ask: do not show it twice
+    const lastTxt = transcriptEl.querySelector('.msg:last-child .txt')?.textContent;
+    if (lastTxt !== ev.text) transcript({ agent: ev.agent ?? 'manager', kind: 'ask', text: ev.text });
     open('chat');
   }
 
-  function answerAsk(askId, { text = '', approved = true, auto = false } = {}) {
+  function answerAsk(askId, { text = '', approved = true, auto = false, answers } = {}) {
     if (askEl.dataset.askId !== askId) return;
     askEl.hidden = true;
     askEl.dataset.askId = '';
     transcript({ agent: 'you', kind: 'you', who: auto ? 'คุณ (ตอบอัตโนมัติ)' : 'คุณ',
       text: text || (approved ? 'อนุมัติ' : 'ปฏิเสธ') });
-    onFlowAnswer?.(askId, { text, approved });
+    onFlowAnswer?.(askId, { text, approved, ...(answers ? { answers } : {}) });
   }
 
   /** Tool approval from an engineer: allow / deny. */
@@ -243,29 +314,89 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
   renderDocs();
 
   // ---------------------------------------------------------------- project
-  function project(ev) {
+  let projects = [];
+  let lastStatus = null;
+  function setProjects(list) { projects = list ?? []; if (lastStatus) project(lastStatus); else renderProjectHome(); }
+
+  function projectPicker() {
+    const wrap = document.createElement('div');
+    wrap.className = 'projects';
+    if (projects.length) {
+      const sel = document.createElement('select');
+      sel.id = 'project-select';
+      for (const p of projects) {
+        const o = document.createElement('option');
+        o.value = p.id; o.textContent = `${p.id} · ${p.path}`; o.selected = !!p.current;
+        sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => onProjectSelect?.(sel.value));
+      wrap.appendChild(sel);
+    }
+    const form = document.createElement('form');
+    form.className = 'add';
+    form.innerHTML = `<input type="text" id="project-path" placeholder="path ของ repo บนเครื่อง หรือ URL ให้ clone" />`
+      + `<input type="text" id="project-branch" placeholder="branch หลัก" value="main" size="8" />`
+      + `<button type="submit" class="primary">เพิ่ม</button>`;
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const path = form.querySelector('#project-path').value.trim();
+      if (!path) return;
+      onProjectAdd?.({ path, mainBranch: form.querySelector('#project-branch').value.trim() || 'main' });
+      form.querySelector('#project-path').value = '';
+    });
+    wrap.appendChild(form);
+    return wrap;
+  }
+
+  function renderProjectHome() {
     projectEl.innerHTML = '';
     const h = document.createElement('h3');
-    h.textContent = ev.project;
+    h.textContent = live ? 'โปรเจกต์' : 'โปรเจกต์ (โหมดสาธิต)';
+    projectEl.appendChild(h);
+    if (live) projectEl.appendChild(projectPicker());
+    else projectEl.insertAdjacentHTML('beforeend', '<p class="empty">ต่อ server แล้วจะลงทะเบียน repo ได้ที่นี่ (npm run office)</p>');
+  }
+
+  function project(ev) {
+    lastStatus = ev;
+    projectEl.innerHTML = '';
+    const h = document.createElement('h3');
+    h.textContent = ev.project + (ev.path ? ' · ' + ev.path : '');
+    projectEl.appendChild(h);
+    if (live) projectEl.appendChild(projectPicker());
     const ul = document.createElement('ol');
     ul.className = 'checklist';
     for (const s of ev.steps) {
       const li = document.createElement('li');
       li.className = s.state;   // pass | fail | skip | pending | running
-      li.innerHTML = `<i></i><span class="t"></span><span class="d"></span>`;
+      li.innerHTML = `<i></i><span class="t"></span><span class="d"></span><span class="b"></span>`;
       li.querySelector('.t').textContent = `${s.n}. ${s.title}`;
       li.querySelector('.d').textContent = s.detail ?? '';
+      const b = li.querySelector('.b');
+      if (live && s.state !== 'running') {
+        if ([4, 5, 6].includes(s.n) && s.state !== 'pass') {
+          const m = document.createElement('button'); m.textContent = 'ให้ผู้จัดการทำ';
+          m.addEventListener('click', () => onRecheck?.(s.n, 'manager')); b.appendChild(m);
+        }
+        if ([6, 7].includes(s.n) && s.state !== 'pass' && s.state !== 'skip') {
+          const k = document.createElement('button'); k.textContent = 'ข้าม';
+          k.addEventListener('click', () => onRecheck?.(s.n, 'skip')); b.appendChild(k);
+        }
+        const r = document.createElement('button'); r.textContent = s.n === 8 ? 'ซ้อมอีกครั้ง' : 'ตรวจอีกครั้ง';
+        r.addEventListener('click', () => onRecheck?.(s.n, 'run')); b.appendChild(r);
+      }
       ul.appendChild(li);
     }
-    const ok = ev.steps.every((s) => s.state === 'pass' || s.state === 'skip');
+    const ok = ev.ready ?? ev.steps.every((s) => s.state === 'pass' || s.state === 'skip');
     const p = document.createElement('p');
     p.className = 'gate ' + (ok ? 'ok' : 'no');
-    p.textContent = ok ? 'พร้อมคุยกับผู้จัดการ' : 'ช่องคุยจะเปิดเมื่อ checklist ผ่าน';
+    p.textContent = ok ? 'พร้อมคุยกับผู้จัดการ' : 'ช่องคุยจะเปิดเมื่อข้อ 1–5 และ 8 ผ่าน';
     composerInput.disabled = !ok;
     composerInput.placeholder = ok ? 'พิมพ์ไอเดีย หรือตอบผู้จัดการ…' : 'รอ onboarding ให้ผ่านก่อน';
-    projectEl.append(h, ul, p);
+    projectEl.append(ul, p);
     mark('project');
   }
+  renderProjectHome();
 
   // ---------------------------------------------------------------- tv / reports
   function tv({ title, criteria, markdown }) {
@@ -317,7 +448,21 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
     statuses[id] = { state, ticket };
   }
   function statusOf(id) { return statuses[id]; }
-  function mode(text, kind = '') { modeEl.textContent = text; modeEl.className = 'mode ' + kind; }
+  const costs = {};
+  function cost(ev) {
+    costs[ev.agent] = ev.usd;
+    const total = Object.values(costs).reduce((a, b) => a + b, 0);
+    modeEl.title = Object.entries(costs).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`).join('\n');
+    modeEl.dataset.cost = `$${total.toFixed(2)}`;
+  }
+  function mode(text, kind = '') {
+    modeEl.textContent = text;
+    modeEl.className = 'mode ' + kind;
+    live = kind === 'live';
+    renderPhaseActions(lastStatus?.feature);
+    if (!lastStatus) renderProjectHome();
+    else project(lastStatus);
+  }
 
   // ---------------------------------------------------------------- mock bar
   const play = mockbar.querySelector('.play');
@@ -337,8 +482,9 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
 
   return {
     open, close, phase, transcript, ask, answerAsk, approval, decideApproval,
-    board, docs: docsUpdate, project, tv, report, status, statusOf, mode,
+    board, docs: docsUpdate, project, setProjects, tv, report, status, statusOf, cost, mode,
     mockState, showMockbar,
+    get live() { return live; },
     get autoAnswer() { return auto.checked; },
     get speed() { return Number(speed.value); },
   };

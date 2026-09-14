@@ -11,6 +11,9 @@ export const EVENT_VERSION = 1;
  * Scene → driver messages are listed too because the mock answers them.
  */
 export const SCHEMA = {
+  // ---- driver → scene: the connection ----------------------------------------
+  'hello':            ['server', 'projects'],             // + project?, phase?, feature?
+  'session.cost':     ['agent', 'usd'],                   // running total for one session
   // ---- driver → scene: the flow ------------------------------------------------
   'flow.phase':       ['phase'],                          // + hitl?, feature?
   'flow.ask':         ['askId', 'kind', 'text'],          // kind: question | seams | tickets
@@ -36,6 +39,7 @@ export const SCHEMA = {
   // ---- scene → driver ------------------------------------------------------------
   'command':          ['text'],
   'flow.answer':      ['askId'],                          // + text? / approved?
+  'flow.next':        ['phase'],                          // human advances the manager to a phase
   'answer':           ['askId', 'allow'],
   'project.add':      ['path'],
   'project.select':   ['project'],

@@ -62,12 +62,21 @@ ticks acceptance criteria; the manager reports back on the TV.
 
 Nothing in the browser talks to Claude. The scene only consumes an **event stream**
 (`src/agents/events.js` is the contract) and a **Director** turns each event into walking,
-sitting and speech bubbles. Today the events come from `src/agents/mock.js`, a scripted
-driver that plays the whole flow including a tool approval, a failed review, a stalled ticket
-and an escalation; press **ทีม** then **เล่นตัวอย่าง**, or type an idea into the chat.
-Untick *ตอบให้เอง* to answer the manager's questions yourself. The same panel and Director
-will sit on a WebSocket to a local Node process running the Claude Agent SDK in phase 1;
-the GitHub Pages build stays on the mock.
+sitting and speech bubbles. Two drivers speak that contract:
+
+- **Office Server** (`server/`, `npm run office`): a local Node process on the
+  [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk). It registers a repo, runs
+  an 8-step onboarding (toolchain, `docs/agents/office.md`, `/init`, Matt's
+  `/setup-matt-pocock-skills`, a worktree rehearsal), then holds the manager's session
+  across grill → spec → tickets. The browser reaches it through Vite's `/office` proxy;
+  the mode badge in the panel says `เชื่อมต่อ server`. Runbook: [server/README.md](server/README.md).
+- **Mock** (`src/agents/mock.js`): a scripted driver that plays the whole flow including a
+  tool approval, a failed review, a stalled ticket and an escalation. It takes over whenever
+  no server answers, which is what the GitHub Pages build runs. Press **ทีม** then
+  **เล่นตัวอย่าง**; untick *ตอบให้เอง* to answer the manager's questions yourself.
+
+The team lives in `team/*.md` (Claude Code subagent frontmatter: tools, model, preloaded
+skills). Implementers, reviewer and QA picking tickets off the board is phase 2.
 
 `npm test` runs the Director against a fake crew and the event validator (`tests/`).
 

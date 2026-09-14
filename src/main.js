@@ -11,6 +11,7 @@ import { Bubbles } from './agents/bubbles.js';
 import { Director } from './agents/director.js';
 import { createPanel } from './agents/panel.js';
 import { MockDriver, demoScript } from './agents/mock.js';
+import { Bridge } from './agents/bridge.js';
 import { make } from './agents/events.js';
 
 // '/' during dev, '/my-3d-test/' on GitHub Pages -- vite substitutes this at build time
@@ -47,7 +48,8 @@ const ui = createUI({
   onSelect: (i) => crew.selectIndex(i),
 });
 
-let pack, crew, marker, officeRoot, bubbles, director, panel, mock;
+let pack, crew, marker, officeRoot, bubbles, director, panel, mock, bridge;
+let currentProject = null;
 const events = [];              // every event the scene has received, for replay / debugging
 const pickables = [];
 const crewPickables = [];
@@ -101,11 +103,18 @@ async function init() {
   // ---- the agent office: bubbles + panel + director, driven by the mock until a server exists
   bubbles = new Bubbles(host);
   const heights = Object.fromEntries(crew.members.map((m) => [m.model, pack.info(m.model)?.height_m ?? 1.4]));
+  // whichever driver is live answers; the mock takes over whenever the server is not there
+  const driver = { send: (m) => (bridge?.live ? bridge.send(m) : mock.send(m)) };
   panel = createPanel({
     labels: LABEL,
     onCommand: (text) => driver.send(make('command', { text })),
     onFlowAnswer: (askId, a) => { director.answered(askId); driver.send(make('flow.answer', { askId, ...a })); },
     onAnswer: (askId, allow) => { director.answered(askId); driver.send(make('answer', { askId, allow })); },
+    onNext: (phase) => driver.send(make('flow.next', { phase })),
+    onCancel: () => driver.send(make('cancel')),
+    onProjectAdd: ({ path, mainBranch }) => driver.send(make('project.add', { path, mainBranch })),
+    onProjectSelect: (id) => driver.send(make('project.select', { project: id })),
+    onRecheck: (step, action) => driver.send(make('project.recheck', { project: currentProject ?? '-', step, action })),
     onMock: (op, v) => {
       if (op === 'play') mock.start(demoScript());
       if (op === 'stop') mock.stop();
@@ -118,7 +127,22 @@ async function init() {
     places: { approach: approachPointFor, highlight },
     onStatus: () => crew.onChange(),
   });
-  const receive = (e) => { events.push(e); director.handle(e); };
+  const receive = (e) => {
+    events.push(e);
+    if (e.type === 'hello') {                       // connection banner: projects + snapshot
+      currentProject = e.project;
+      panel.setProjects(e.projects);
+      if (e.snapshot?.tickets?.length) director.handle(make('board.update', { tickets: e.snapshot.tickets }));
+      return;
+    }
+    if (e.type === 'project.status') currentProject = e.project;
+    if (e.replayed) {                               // history after a reload: transcript only, nobody walks
+      if (e.type === 'agent.say' || e.type === 'flow.ask') panel.transcript({ agent: e.agent ?? 'manager', kind: e.type === 'flow.ask' ? 'ask' : 'say', text: e.text, replayed: true });
+      else if (e.type === 'docs.update') panel.docs(e);
+      return;
+    }
+    director.handle(e);
+  };
   mock = new MockDriver({
     emit: receive,
     speed: panel.speed,
@@ -132,11 +156,26 @@ async function init() {
     if (askEv.type === 'flow.ask') panel.answerAsk(askEv.askId, { auto: true });
     else panel.decideApproval(askEv.askId, r.allow, true);
   };
-  const driver = mock;            // bridge.js (phase 1) will take this seat when a server answers
-  panel.mode('โหมดสาธิต', 'mock');
-  panel.showMockbar(true);
+  const useMock = (why) => {
+    if (panel.live) panel.transcript({ agent: 'manager', kind: 'warn', text: 'หลุดจาก server (' + why + ') กลับสู่โหมดสาธิต' });
+    panel.mode('โหมดสาธิต', 'mock');
+    panel.showMockbar(true);
+  };
+  bridge = new Bridge({
+    emit: receive,
+    onState: (s, detail) => {
+      if (s === 'live') {
+        mock.stop();
+        panel.mode('เชื่อมต่อ server', 'live');
+        panel.showMockbar(false);
+        panel.transcript({ agent: 'manager', kind: 'done', text: 'ต่อ Office Server แล้ว (' + detail + ')' });
+      } else if (s === 'down' && !mock.running) useMock(detail);
+    },
+  });
+  panel.mode('กำลังต่อ server…', '');
   panel.transcript({ agent: 'manager', kind: 'say',
-    text: 'ยังไม่ได้ต่อ server: กด "เล่นตัวอย่าง" เพื่อดูทีมทำงานครบ flow หรือพิมพ์ไอเดียเพื่อเริ่มสาธิตด้วยข้อความของคุณ' });
+    text: 'กำลังหา Office Server (npm run office) ถ้าไม่มี จะเป็นโหมดสาธิต: กด "เล่นตัวอย่าง" หรือพิมพ์ไอเดีย' });
+  bridge.start();
 
   host.addEventListener('pointerdown', onPointerDown);
   host.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -167,7 +206,7 @@ async function init() {
   // `step` advances the simulation by hand -- embedded preview panes often park
   // requestAnimationFrame, and this makes the app testable there anyway.
   window.__ube = {
-    viewer, pack, crew, nav, office, pickables, director, panel, mock, events, bubbles,
+    viewer, pack, crew, nav, office, pickables, director, panel, mock, bridge, events, bubbles,
     step(n = 60, dt = 1 / 60) {
       for (let i = 0; i < n; i++) { crew.update(dt); pack.update(dt); bubbles.update(dt); }
       viewer.render();
