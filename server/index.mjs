@@ -13,7 +13,7 @@ import { make, validate } from '../src/agents/events.js';
 import { loadRegistry, addProject, currentProject, saveRegistry } from './projects.mjs';
 import * as state from './state.mjs';
 import { loadTeam } from './team.mjs';
-import { readOffice } from './office.mjs';
+import { readOffice, dailyBudgetUsd } from './office.mjs';
 import { Approvals } from './permissions.mjs';
 import { Flow } from './flow.mjs';
 import { runChecks, stepsWith, allRequiredPassed } from './onboard.mjs';
@@ -204,7 +204,9 @@ function hello() {
     phase: st?.phase ?? null,
     feature: st?.feature ?? null,
     team: Object.keys(team),
-    snapshot: flow?.snapshot() ?? null,
+    // flow can still be mid-activate() right after boot or a project switch; a connection
+    // landing in that window must not lose the budget for good, since hello() is sent once
+    snapshot: flow ? flow.snapshot() : project ? { dailyBudgetUsd: dailyBudgetUsd(readOffice(project.path)) } : null,
   });
 }
 

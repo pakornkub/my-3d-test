@@ -460,17 +460,22 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
   }
   function statusOf(id) { return statuses[id]; }
   const WARN_RATIO = 0.8;
-  const OVER_RATIO = 1;
   /**
    * The team figure -- today's team cost against the daily budget, with no server this
    * still renders (as `team`, defaulting to 0) but `budget` is undefined so no denominator
    * is invented. `breakdown` lists every agent id that has spent money, roster or not.
+   *
+   * "Known" is `budget != null`, checked once and reused for the denominator and both
+   * styles -- comparing `team`/`budget` directly (not a `team / budget` ratio) so a
+   * `daily-budget-usd: 0` still reads as over rather than silently dividing to a falsy 0.
    */
   function cost({ team, budget, breakdown }) {
-    const ratio = budget ? team / budget : 0;
-    teamCostEl.textContent = `วันนี้ $${team.toFixed(2)}` + (budget != null ? ` / $${budget}` : '');
-    teamCostEl.classList.toggle('over', budget != null && ratio >= OVER_RATIO);
-    teamCostEl.classList.toggle('warn', budget != null && ratio >= WARN_RATIO && ratio < OVER_RATIO);
+    const known = budget != null;
+    const over = known && team >= budget;
+    const warn = known && !over && team >= budget * WARN_RATIO;
+    teamCostEl.textContent = `วันนี้ $${team.toFixed(2)}` + (known ? ` / $${budget.toFixed(2)}` : '');
+    teamCostEl.classList.toggle('over', over);
+    teamCostEl.classList.toggle('warn', warn);
     const rows = Object.entries(breakdown).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`);
     teamCostEl.title = [...rows, 'วันนี้ = วัน UTC (รีเซ็ต 07:00 น. เวลาไทย)'].join('\n');
   }

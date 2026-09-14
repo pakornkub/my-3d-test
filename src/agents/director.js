@@ -61,7 +61,9 @@ export class Director {
   }
 
   #publishCost() {
-    this.panel.cost?.({ team: this.teamCost(), budget: this.budget, breakdown: this.breakdown() });
+    const breakdown = this.breakdown();
+    const team = Object.values(breakdown).reduce((a, b) => a + b, 0);
+    this.panel.cost?.({ team, budget: this.budget, breakdown });
   }
 
   // ---------------------------------------------------------------- helpers
