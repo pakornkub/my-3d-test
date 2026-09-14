@@ -40,8 +40,10 @@ function broadcast(ev) {
   if (project) state.logEvent(project.id, ev);
   // the one place state.costs is written after boot, so the state file actually reflects a
   // turn's cost (not just whatever activate() last reseeded from the log) and a session
-  // re-created in-process (e.g. after a close) reads back its own latest total, not a stale one
-  if (st && ev.type === 'session.cost') { st.costs = { ...st.costs, [state.sessionKey(ev)]: state.costEntry(ev) }; saveState(); }
+  // re-created in-process (e.g. after a close) reads back its own latest total, not a stale
+  // one; recordCost() also drops the previous day's bucket the moment a UTC midnight passes
+  // while the server keeps running, so state.costs never outgrows "today" (ADR-0002)
+  if (st && ev.type === 'session.cost') { state.recordCost(st, ev); saveState(); }
   const s = JSON.stringify(ev);
   for (const c of clients) if (c.readyState === 1) c.send(s);
   const tag = ev.agent ? `${ev.agent}` : 'flow';
@@ -66,6 +68,7 @@ async function activate(p) {
   // seed today's per-session running totals from the log, not from the state file, so a
   // restart never shows stale money and deleting today's log starts the day back at zero
   st.costs = state.runningTotals(state.readLog(p.id));
+  st.costsDay = state.today();
   reg.current = p.id;
   saveRegistry(reg);
   await pipeline?.stop();
@@ -226,17 +229,17 @@ function hello() {
 const wss = new WebSocketServer({ port: PORT, path: '/office' });
 wss.on('connection', (ws) => {
   clients.add(ws);
-  ws.send(JSON.stringify(hello()));
+  unicast(ws, hello());
   if (project) {
-    ws.send(JSON.stringify(projectStatus()));
-    ws.send(JSON.stringify(make('flow.phase', { phase: st.phase, feature: st.feature })));
-    if (flow) ws.send(JSON.stringify(make('board.update', { feature: st.feature, tickets: flow.snapshot().tickets })));
+    unicast(ws, projectStatus());
+    unicast(ws, make('flow.phase', { phase: st.phase, feature: st.feature }));
+    if (flow) unicast(ws, make('board.update', { feature: st.feature, tickets: flow.snapshot().tickets }));
     // today's running totals -- st.costs is boot-seeded from the log (activate()) and then
     // kept live by every session.cost broadcast (broadcast()), so it is never stale here
     for (const ev of state.costEvents(st.costs)) unicast(ws, { ...make('session.cost', ev), replayed: true });
     // the recent conversation, so a reloaded scene is not blank
     const recent = state.readLog(project.id).filter((e) => ['agent.say', 'flow.ask', 'docs.update', 'ticket.closed', 'feature.report'].includes(e.type)).slice(-40);
-    for (const ev of recent) ws.send(JSON.stringify({ ...ev, replayed: true }));
+    for (const ev of recent) unicast(ws, { ...ev, replayed: true });
   }
   ws.on('message', (data) => { try { handle(JSON.parse(String(data)), ws); } catch (e) { console.warn('[server] bad frame', e.message); } });
   ws.on('close', () => clients.delete(ws));
