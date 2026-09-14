@@ -84,7 +84,7 @@ test('next: spec then tickets advance the phase in order and refuse to go backwa
 test('the manager session is seeded from any prior member cost, and a turn folds its result back into state.costs', async () => {
   const s = fakeSession();
   let seenSeed;
-  const state = { phase: 'implement', feature: null, managerSessionId: null, costs: { manager: 2 } };
+  const state = { phase: 'implement', feature: null, managerSessionId: null, costs: { manager: { agent: 'manager', usd: 2 } } };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
     state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
@@ -93,7 +93,27 @@ test('the manager session is seeded from any prior member cost, and a turn folds
   });
   await flow.onCommand('อยากได้ X');
   assert.equal(seenSeed, 2);          // the restart-safe seed reached the new session
-  assert.equal(state.costs.manager, s.costUsd);   // the turn's result replaces this member's figure
+  assert.equal(state.costs[state.managerSessionId].usd, s.costUsd);   // the turn's result replaces this member's figure
+});
+
+test('the seed is still found once a session.cost event carries `session` (ADR-0002), not just by the literal agent id', async () => {
+  // stands in for a boot-time reseed from a log written after a sibling ticket adds the
+  // `session` field to session.cost events -- the manager's entry moves off the 'manager'
+  // key onto its SDK session id, and the seed lookup must follow it there
+  const s = fakeSession();
+  let seenSeed;
+  const state = {
+    phase: 'implement', feature: null, managerSessionId: 'sess-1',
+    costs: { 'sess-1': { agent: 'manager', usd: 7 } },
+  };
+  const flow = new Flow({
+    project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
+    state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
+    office: null, emit: () => {}, approvals: null, save: () => {},
+    createSession: (opts) => { seenSeed = opts.costSeed; return s; },
+  });
+  await flow.onCommand('อยากได้ X');
+  assert.equal(seenSeed, 7);          // NOT 0 -- this is the restart AC the ticket exists for
 });
 
 test('a message during onboarding is refused without touching the session', async () => {

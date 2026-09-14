@@ -221,7 +221,7 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify(make('flow.phase', { phase: st.phase, feature: st.feature })));
     if (flow) ws.send(JSON.stringify(make('board.update', { feature: st.feature, tickets: flow.snapshot().tickets })));
     // today's running totals, so neither a browser reload nor a server restart appears to reset the day
-    for (const [agent, usd] of Object.entries(st.costs ?? {})) ws.send(JSON.stringify(make('session.cost', { agent, usd })));
+    for (const ev of state.costEvents(st.costs)) ws.send(JSON.stringify(make('session.cost', ev)));
     // the recent conversation, so a reloaded scene is not blank
     const recent = state.readLog(project.id).filter((e) => ['agent.say', 'flow.ask', 'docs.update', 'ticket.closed', 'feature.report'].includes(e.type)).slice(-40);
     for (const ev of recent) ws.send(JSON.stringify({ ...ev, replayed: true }));

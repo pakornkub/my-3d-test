@@ -7,7 +7,7 @@ import { parseAgentFile, loadTeam, agentDefinitions } from '../server/team.mjs';
 import { parseTicket, readBoard, claimTicket, setTicketField } from '../server/board.mjs';
 import { parseOffice, renderOffice, commandAllowed, allowlistRules, DEFAULTS } from '../server/office.mjs';
 import { summarizeTool } from '../server/runner.mjs';
-import { runningTotals } from '../server/state.mjs';
+import { runningTotals, costFor, costEvents } from '../server/state.mjs';
 
 // ---------------------------------------------------------------- team
 test('parseAgentFile reads frontmatter lists and scalars, body becomes the prompt', () => {
@@ -102,7 +102,10 @@ test('runningTotals keys by session id, not by agent: two sessions of one agent 
     { type: 'session.cost', agent: 'eng_m1', session: 's1', usd: 0.42 },
     { type: 'session.cost', agent: 'eng_m1', session: 's2', usd: 0.10 },
   ]);
-  assert.deepEqual(totals, { s1: 0.42, s2: 0.10 });
+  assert.deepEqual(totals, {
+    s1: { agent: 'eng_m1', usd: 0.42 },
+    s2: { agent: 'eng_m1', usd: 0.10 },
+  });
 });
 
 test('runningTotals keeps the latest running total per session key, not a sum', () => {
@@ -111,7 +114,7 @@ test('runningTotals keeps the latest running total per session key, not a sum', 
     { type: 'session.cost', agent: 'manager', usd: 1.20 },
     { type: 'session.cost', agent: 'manager', usd: 2.00 },
   ]);
-  assert.deepEqual(totals, { manager: 2.00 });
+  assert.deepEqual(totals, { manager: { agent: 'manager', usd: 2.00 } });
 });
 
 test('runningTotals skips malformed entries instead of throwing', () => {
@@ -119,17 +122,48 @@ test('runningTotals skips malformed entries instead of throwing', () => {
     { type: 'session.cost', agent: 'manager', usd: 0.30 },
     { type: 'session.cost', agent: 'manager' },                // missing usd
     { type: 'session.cost', usd: 0.99 },                       // missing agent/session
+    { type: 'session.cost', session: 's9', usd: 1 },           // missing agent (required by schema)
     { type: 'session.cost', agent: 'eng_m1', usd: 'oops' },    // usd not a number
     { type: 'agent.say', agent: 'manager', text: 'hi' },       // not a cost event
     null,
     'not an object',
     { type: 'session.cost', agent: 'manager', usd: 0.55 },
   ]);
-  assert.deepEqual(totals, { manager: 0.55 });
+  assert.deepEqual(totals, { manager: { agent: 'manager', usd: 0.55 } });
 });
 
 test('runningTotals of an empty log is an empty map', () => {
   assert.deepEqual(runningTotals([]), {});
+});
+
+// ---------------------------------------------------------------- state: key-space
+test('costFor finds a legacy agent-keyed entry even when a session id is already known', () => {
+  // today's shape: session.cost carries no `session` field yet, so the log-derived map is
+  // keyed by agent id -- a caller that already knows the SDK session id must still find it
+  const costs = runningTotals([{ type: 'session.cost', agent: 'manager', usd: 1.5 }]);
+  assert.equal(costFor(costs, { agent: 'manager', session: 'sess-A' }), 1.5);
+});
+
+test('costFor prefers the session-keyed entry once session.cost events carry `session` (ADR-0002)', () => {
+  const costs = runningTotals([
+    { type: 'session.cost', agent: 'manager', usd: 1.5 },              // stale, pre-upgrade line
+    { type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 4 }, // fresh, same session
+  ]);
+  assert.equal(costFor(costs, { agent: 'manager', session: 'sess-A' }), 4);
+});
+
+test('costFor is 0 for an agent with nothing logged', () => {
+  assert.equal(costFor({}, { agent: 'manager', session: null }), 0);
+});
+
+test('costEvents reconstructs the real agent id, not the map key, for a session-keyed entry', () => {
+  const costs = runningTotals([{ type: 'session.cost', agent: 'eng_m1', session: 's1', usd: 0.42 }]);
+  assert.deepEqual(costEvents(costs), [{ agent: 'eng_m1', usd: 0.42, session: 's1' }]);
+});
+
+test('costEvents omits `session` for an agent-keyed (legacy) entry', () => {
+  const costs = runningTotals([{ type: 'session.cost', agent: 'manager', usd: 2 }]);
+  assert.deepEqual(costEvents(costs), [{ agent: 'manager', usd: 2 }]);
 });
 
 // ---------------------------------------------------------------- runner

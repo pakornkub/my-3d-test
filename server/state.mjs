@@ -19,7 +19,7 @@ const EMPTY = () => ({
   phase: 'onboard',
   onboarding: [],          // [{ n, state, detail }]
   jobs: {},                // ticket id -> { agent, sessionId, attempt, status, worktree }
-  costs: {},               // session key (`ev.session ?? ev.agent`) -> its latest running total
+  costs: {},               // session key (`ev.session ?? ev.agent`) -> { agent, usd }, see runningTotals
   updatedAt: null,
 });
 
@@ -51,20 +51,42 @@ export function readLog(projectId, day = new Date().toISOString().slice(0, 10)) 
   } catch { return []; }
 }
 
+/** The one place the money key is derived, so state.mjs, flow.mjs and pipeline.mjs can never disagree on it (ADR-0002). */
+export function sessionKey({ session, agent }) { return session ?? agent; }
+
 /**
- * The day's `session.cost` events reduced to the latest running total per session key
+ * The day's `session.cost` events reduced to the latest entry per session key
  * (`ev.session ?? ev.agent`) -- the boot-time seed so a restart never makes the figure
  * shown to the scene jump backwards. A cost event replaces its key's total rather than
  * adding to it (ADR-0002); malformed or unrelated entries are skipped, not thrown on.
+ * The agent is kept alongside the total (not just the key) so a key that turns out to be
+ * a session id, not a crew id, can still be re-broadcast under its real agent -- see costEvents.
  */
 export function runningTotals(events) {
   const totals = {};
   for (const ev of events ?? []) {
     if (!ev || typeof ev !== 'object') continue;
     if (ev.type !== 'session.cost') continue;
-    const key = ev.session ?? ev.agent;
-    if (!key || typeof ev.usd !== 'number') continue;
-    totals[key] = ev.usd;
+    if (typeof ev.agent !== 'string' || typeof ev.usd !== 'number') continue;
+    const key = sessionKey(ev);
+    totals[key] = { agent: ev.agent, usd: ev.usd };
   }
   return totals;
+}
+
+/**
+ * One identity's latest running total out of a `runningTotals`-shaped map. Tries the
+ * session key first (once a `session.cost` event carries `session`, ADR-0002), then falls
+ * back to the plain agent key -- the shape every event has today, and what a log written
+ * before the `session` field existed will always produce (ADR-0001). Without this fallback
+ * a session id becoming known makes the seed silently resolve to 0.
+ */
+export function costFor(costs, { agent, session }) {
+  return costs?.[sessionKey({ agent, session })]?.usd ?? costs?.[agent]?.usd ?? 0;
+}
+
+/** `state.costs` turned back into the `session.cost` events a newly-connected scene needs. */
+export function costEvents(costs) {
+  return Object.entries(costs ?? {}).map(([key, { agent, usd }]) =>
+    key === agent ? { agent, usd } : { agent, usd, session: key });
 }

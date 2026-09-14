@@ -15,6 +15,7 @@ import { make } from '../src/agents/events.js';
 import { Session } from './runner.mjs';
 import { readBoard, listFeatures, watchBoard } from './board.mjs';
 import { agentDefinitions, teamHash } from './team.mjs';
+import { costFor, sessionKey } from './state.mjs';
 
 const PLUGIN = 'mattpocock-skills';
 const PLUGIN_VERSION = '1.2.3';
@@ -70,7 +71,7 @@ export class Flow {
       emit: this.emit,
       onFile: (p) => this.#onFile(p),
       stallMinutes: Number(policy['stall-minutes'] ?? 6),
-      costSeed: this.state.costs?.manager ?? 0,
+      costSeed: costFor(this.state.costs, { agent: 'manager', session: this.state.managerSessionId }),
       options: {
         cwd: this.repo,
         model: m.model,
@@ -109,7 +110,8 @@ export class Flow {
     this.emit(make('flow.phase', { phase: this.phase, hitl: HITL.has(this.phase), feature: this.state.feature }));
     const res = await s.send(text);
     if (s.sessionId && s.sessionId !== this.state.managerSessionId) { this.state.managerSessionId = s.sessionId; this.save(); }
-    this.state.costs = { ...this.state.costs, manager: s.costUsd };
+    const key = sessionKey({ agent: 'manager', session: this.state.managerSessionId });
+    this.state.costs = { ...this.state.costs, [key]: { agent: 'manager', usd: s.costUsd } };
     this.save();
     this.refreshBoard();
     if (res?.ended) return res;

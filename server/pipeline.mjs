@@ -21,7 +21,7 @@ import { readBoard, claimTicket, setTicketField, appendComment } from './board.m
 import { runGates } from './gates.mjs';
 import { ticketReport, validateReport, featureReportPrompt } from './report.mjs';
 import * as wt from './worktree.mjs';
-import { STATE_DIR } from './state.mjs';
+import { STATE_DIR, costFor } from './state.mjs';
 
 const IMPLEMENTERS = ['eng_m1', 'eng_f1', 'eng_m2'];
 const REVIEWER = 'eng_f2';
@@ -439,7 +439,7 @@ export class Pipeline {
       costs[k].sessions += j.attempt ?? 1;
       costs[k].usd += j.usd ?? 0;
     }
-    costs.manager = { sessions: 1, usd: this.state.costs?.manager ?? 0 };
+    costs.manager = { sessions: 1, usd: costFor(this.state.costs, { agent: 'manager', session: this.state.managerSessionId }) };
     const branch = wt.featureBranch(this.feature);
     const diff = wt.diffStat(this.repo, this.project.mainBranch, branch);
     const prompt = featureReportPrompt({
