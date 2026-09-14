@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Flow } from '../server/flow.mjs';
-import { runningTotals } from '../server/costs.mjs';
+import { daySeed } from '../server/costs.mjs';
 
 // an empty repo per test: a real .scratch/ would start an fs.watch and keep the runner alive
 const emptyRepo = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ube-flow-'));
@@ -101,12 +101,12 @@ test('the seed is still found once a session.cost event carries `session` (ADR-0
   // session.cost events with `session` -- the manager's entry moves off the 'manager' key
   // onto its SDK session id, and the seed lookup must follow it there. Building the fixture
   // through the real day-seed function (rather than a hand-rolled { 'sess-1': {...} }
-  // literal) keeps this test honest about runningTotals' actual output shape.
+  // literal) keeps this test honest about daySeed's actual output shape.
   const s = fakeSession();
   let seenSeed;
   const state = {
     phase: 'implement', feature: null, managerSessionId: 'sess-1',
-    runningTotals: runningTotals([{ v: 1, t: Date.now(), type: 'session.cost', agent: 'manager', session: 'sess-1', usd: 7 }]),
+    runningTotals: daySeed([{ v: 1, t: Date.now(), type: 'session.cost', agent: 'manager', session: 'sess-1', usd: 7 }]),
   };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },

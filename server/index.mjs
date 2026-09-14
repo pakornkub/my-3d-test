@@ -35,15 +35,15 @@ let flow = null;
 let pipeline = null;
 let onboarding = false;
 
-/** Validates `ev`, warning instead of sending it when malformed -- the one guard broadcast() and unicast() both run through, so it can't drift between the two send paths. */
-function refuseMalformed(ev) {
+/** True when `ev` passes schema validation; warns and returns false otherwise -- the one guard broadcast() and unicast() both run through, so it can't drift between the two send paths. */
+function okToSend(ev) {
   const errs = validate(ev);
   if (errs.length) console.warn('[server] refusing to send malformed event', ev.type, errs);
   return errs.length === 0;
 }
 
 function broadcast(ev) {
-  if (!refuseMalformed(ev)) return;
+  if (!okToSend(ev)) return;
   if (project) state.logEvent(project.id, ev);
   // keeps state.runningTotals (and the state file) live between boots, per session.cost
   if (st && ev.type === 'session.cost') { costs.recordCost(st, ev); saveState(); }
@@ -58,7 +58,7 @@ const saveState = () => project && state.save(project.id, st);
 
 /** Sends a freshly-built (not yet logged or broadcast) event to one newly-connected scene. */
 function unicast(ws, ev) {
-  if (refuseMalformed(ev)) ws.send(JSON.stringify(ev));
+  if (okToSend(ev)) ws.send(JSON.stringify(ev));
 }
 
 // ---------------------------------------------------------------- project lifecycle
@@ -68,7 +68,7 @@ async function activate(p) {
   st = state.load(p.id);
   // seed today's running totals from the log, not from the state file, so a restart never
   // shows stale money and deleting today's log starts the day back at zero
-  st.runningTotals = costs.runningTotals(state.readLog(p.id));
+  st.runningTotals = costs.daySeed(state.readLog(p.id));
   st.runningTotalsDay = state.today();
   reg.current = p.id;
   saveRegistry(reg);
@@ -236,7 +236,7 @@ wss.on('connection', (ws) => {
     unicast(ws, make('flow.phase', { phase: st.phase, feature: st.feature }));
     if (flow) unicast(ws, make('board.update', { feature: st.feature, tickets: flow.snapshot().tickets }));
     // today's running totals, boot-seeded from the log and kept live by every broadcast()
-    for (const ev of costs.costEvents(st.runningTotals)) unicast(ws, { ...make('session.cost', ev), replayed: true });
+    for (const ev of Object.values(st.runningTotals ?? {})) unicast(ws, { ...make('session.cost', ev), replayed: true });
     // the recent conversation, so a reloaded scene is not blank
     const recent = state.readLog(project.id).filter((e) => ['agent.say', 'flow.ask', 'docs.update', 'ticket.closed', 'feature.report'].includes(e.type)).slice(-40);
     for (const ev of recent) unicast(ws, { ...ev, replayed: true });

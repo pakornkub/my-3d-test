@@ -1,7 +1,7 @@
 // state.mjs -- what survives a server restart: one JSON file per project under
 // server/state/<project>.json, load()/save()'d whole, and the append-only per-day event
-// log (logEvent/readLog) it can be rebuilt from. costs.mjs owns the money rules that read
-// and write state.runningTotals; this file only owns the shape and the disk I/O.
+// log (logEvent/readLog) it can be rebuilt from. state.runningTotals is one of its fields;
+// costs.mjs computes what goes into it, index.mjs is the one that assigns and saves it.
 
 import fs from 'node:fs';
 import path from 'node:path';

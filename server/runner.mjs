@@ -8,6 +8,7 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { make } from '../src/agents/events.js';
+import { costFields } from './costs.mjs';
 
 const SHORT = (s, n = 90) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s ?? '');
 
@@ -174,7 +175,7 @@ export class Session {
           // tag the session id so this running total keys itself in state.mjs (ADR-0002)
           // instead of collapsing onto the plain agent id, which would make a second
           // session of the same agent overwrite the first rather than add to it
-          this.emit(make('session.cost', { agent: this.agent, usd: this.costUsd, turns: this.turns, ...(this.sessionId ? { session: this.sessionId } : {}) }));
+          this.emit(make('session.cost', { ...costFields(this.agent, this.costUsd, this.sessionId), turns: this.turns }));
         }
         if (msg.session_id) this.sessionId = msg.session_id;
         if (msg.subtype !== 'success') {

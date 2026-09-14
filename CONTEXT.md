@@ -40,6 +40,12 @@ The cost a session has incurred since it began. Every cost event carries a runni
 amount added since the last one, so costs are replaced per session and never accumulated per event.
 _Avoid_: increment, delta, spend
 
+**Session key**:
+What a running total is filed under: a session's id once a `session.cost` event carries one, or its
+crew id for a log line written before that field existed. Two events with the same session key
+replace each other rather than adding up.
+_Avoid_: cost key, agent key
+
 **Member cost**:
 What one crew member has cost: the sum of the running totals of all their sessions. The figure the
 roster shows next to a person.

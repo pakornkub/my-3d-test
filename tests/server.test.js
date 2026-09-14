@@ -7,7 +7,7 @@ import { parseAgentFile, loadTeam, agentDefinitions } from '../server/team.mjs';
 import { parseTicket, readBoard, claimTicket, setTicketField } from '../server/board.mjs';
 import { parseOffice, renderOffice, commandAllowed, allowlistRules, DEFAULTS } from '../server/office.mjs';
 import { summarizeTool } from '../server/runner.mjs';
-import { runningTotals, runningTotalFor, costEvents, managerRunningTotal, recordCost } from '../server/costs.mjs';
+import { daySeed, runningTotalFor, managerRunningTotal, recordCost } from '../server/costs.mjs';
 
 // ---------------------------------------------------------------- team
 test('parseAgentFile reads frontmatter lists and scalars, body becomes the prompt', () => {
@@ -96,9 +96,9 @@ test('office.md round-trips and the allowlist blocks chained and pushing command
   assert.ok(!commandAllowed('rm -rf /', rules));
 });
 
-// ---------------------------------------------------------------- state: day-seed
-test('runningTotals keys by session id, not by agent: two sessions of one agent stay separate', () => {
-  const totals = runningTotals([
+// ---------------------------------------------------------------- costs: day-seed
+test('daySeed keys by session id, not by agent: two sessions of one agent stay separate', () => {
+  const totals = daySeed([
     { type: 'session.cost', agent: 'eng_m1', session: 's1', usd: 0.42 },
     { type: 'session.cost', agent: 'eng_m1', session: 's2', usd: 0.10 },
   ]);
@@ -108,8 +108,8 @@ test('runningTotals keys by session id, not by agent: two sessions of one agent 
   });
 });
 
-test('runningTotals keeps the latest running total per session key, not a sum', () => {
-  const totals = runningTotals([
+test('daySeed keeps the latest running total per session key, not a sum', () => {
+  const totals = daySeed([
     { type: 'session.cost', agent: 'manager', usd: 0.50 },
     { type: 'session.cost', agent: 'manager', usd: 1.20 },
     { type: 'session.cost', agent: 'manager', usd: 2.00 },
@@ -117,8 +117,8 @@ test('runningTotals keeps the latest running total per session key, not a sum', 
   assert.deepEqual(totals, { manager: { agent: 'manager', usd: 2.00 } });
 });
 
-test('runningTotals skips malformed entries instead of throwing', () => {
-  const totals = runningTotals([
+test('daySeed skips malformed entries instead of throwing', () => {
+  const totals = daySeed([
     { type: 'session.cost', agent: 'manager', usd: 0.30 },
     { type: 'session.cost', agent: 'manager' },                // missing usd
     { type: 'session.cost', usd: 0.99 },                       // missing agent/session
@@ -132,24 +132,24 @@ test('runningTotals skips malformed entries instead of throwing', () => {
   assert.deepEqual(totals, { manager: { agent: 'manager', usd: 0.55 } });
 });
 
-test('runningTotals of an empty log is an empty map', () => {
-  assert.deepEqual(runningTotals([]), {});
+test('daySeed of an empty log is an empty map', () => {
+  assert.deepEqual(daySeed([]), {});
 });
 
-// ---------------------------------------------------------------- state: key-space
+// ---------------------------------------------------------------- costs: key-space
 test('runningTotalFor finds a legacy agent-keyed entry even when a session id is already known', () => {
   // a log written before the runner tagged session.cost events with `session` (ADR-0001) is
   // keyed by agent id -- a caller that already knows the SDK session id must still find it
-  const costs = runningTotals([{ type: 'session.cost', agent: 'manager', usd: 1.5 }]);
-  assert.equal(runningTotalFor(costs, { agent: 'manager', session: 'sess-A' }), 1.5);
+  const totals = daySeed([{ type: 'session.cost', agent: 'manager', usd: 1.5 }]);
+  assert.equal(runningTotalFor(totals, { agent: 'manager', session: 'sess-A' }), 1.5);
 });
 
 test('runningTotalFor prefers the session-keyed entry once session.cost events carry `session` (ADR-0002)', () => {
-  const costs = runningTotals([
+  const totals = daySeed([
     { type: 'session.cost', agent: 'manager', usd: 1.5 },              // stale, pre-upgrade line
     { type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 4 }, // fresh, same session
   ]);
-  assert.equal(runningTotalFor(costs, { agent: 'manager', session: 'sess-A' }), 4);
+  assert.equal(runningTotalFor(totals, { agent: 'manager', session: 'sess-A' }), 4);
 });
 
 test('runningTotalFor is 0 for an agent with nothing logged', () => {
@@ -157,33 +157,12 @@ test('runningTotalFor is 0 for an agent with nothing logged', () => {
 });
 
 test('managerRunningTotal is the one lookup flow.mjs and pipeline.mjs both defer to, so they cannot drift apart', () => {
-  const totals = runningTotals([{ type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 3 }]);
+  const totals = daySeed([{ type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 3 }]);
   assert.equal(managerRunningTotal({ runningTotals: totals, managerSessionId: 'sess-A' }), 3);
   assert.equal(managerRunningTotal({ runningTotals: {}, managerSessionId: null }), 0);
 });
 
-test('costEvents reconstructs the real agent id, not the map key, for a session-keyed entry', () => {
-  const costs = runningTotals([{ type: 'session.cost', agent: 'eng_m1', session: 's1', usd: 0.42 }]);
-  assert.deepEqual(costEvents(costs), [{ agent: 'eng_m1', usd: 0.42, session: 's1' }]);
-});
-
-test('costEvents omits `session` for an agent-keyed (legacy) entry', () => {
-  const costs = runningTotals([{ type: 'session.cost', agent: 'manager', usd: 2 }]);
-  assert.deepEqual(costEvents(costs), [{ agent: 'manager', usd: 2 }]);
-});
-
-test('costEvents keeps a legacy agent-keyed entry alongside a session-keyed one for a different session, so an earlier session\'s money is never dropped (CONTEXT.md Team cost)', () => {
-  const totals = runningTotals([
-    { type: 'session.cost', agent: 'manager', usd: 1.5 },                    // an earlier, untagged session
-    { type: 'session.cost', agent: 'manager', session: 'sess-A', usd: 4 },   // a later, tagged session
-  ]);
-  assert.deepEqual(costEvents(totals), [
-    { agent: 'manager', usd: 1.5 },
-    { agent: 'manager', usd: 4, session: 'sess-A' },
-  ]);
-});
-
-// ---------------------------------------------------------------- state: day rollover
+// ---------------------------------------------------------------- costs: day rollover
 test('recordCost starts a fresh bucket the moment an event lands on a new UTC day, discarding the old one (ADR-0002)', () => {
   const st = { runningTotals: { manager: { agent: 'manager', usd: 3 } }, runningTotalsDay: '2026-09-14' };
   recordCost(st, { type: 'session.cost', agent: 'manager', usd: 0.2, t: new Date('2026-09-15T00:00:01Z').getTime() });

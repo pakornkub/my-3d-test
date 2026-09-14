@@ -1,27 +1,30 @@
 // costs.mjs -- the running-total-per-session accounting rules (ADR-0002): how one event
-// folds into state.runningTotals, how a day's log seeds it at boot, and how it reads back
-// out. flow.mjs and pipeline.mjs call managerRunningTotal(); index.mjs calls the rest.
+// folds into a running-totals map, how a day's log derives the boot-time seed, and how the
+// manager reads its own total back. flow.mjs and pipeline.mjs call managerRunningTotal();
+// index.mjs calls the rest and is the one that actually assigns state.runningTotals.
 
 import { dayOf } from './state.mjs';
 
-/** The one place the money key is derived, so callers can never disagree on it (ADR-0002). */
+/** @typedef {{ agent: string, usd: number, session?: string }} CostFields -- one session key's entry: the running total, the agent it belongs to, and its session id once known (ADR-0001). */
+
+/** The session key a running total is filed under (see CONTEXT.md, ADR-0002). */
 export function sessionKey({ agent, session }) { return session ?? agent; }
 
-/** One `runningTotals`-entry built from a `session.cost` event (ADR-0001: `session` is optional). */
-export function costEntry(ev) {
-  return { agent: ev.agent, usd: ev.usd, ...(ev.session ? { session: ev.session } : {}) };
+/** @returns {CostFields} -- the shape both a running-totals entry (foldCost) and a live session.cost payload (runner.mjs) build `session` onto. */
+export function costFields(agent, usd, session) {
+  return { agent, usd, ...(session ? { session } : {}) };
 }
 
-/** Folds one event into a running-totals map, replacing its session's entry (ADR-0002); a malformed or unrelated event passes through unchanged. */
+/** Folds one event into a running-totals map, replacing its session key's entry (ADR-0002); a malformed or unrelated event passes through unchanged. */
 export function foldCost(totals, ev) {
   if (!ev || typeof ev !== 'object') return totals;
   if (ev.type !== 'session.cost') return totals;
   if (typeof ev.agent !== 'string' || typeof ev.usd !== 'number') return totals;
-  return { ...totals, [sessionKey(ev)]: costEntry(ev) };
+  return { ...totals, [sessionKey(ev)]: costFields(ev.agent, ev.usd, ev.session) };
 }
 
-/** A day's `session.cost` events reduced to the latest entry per session key -- the boot-time seed for `state.runningTotals`. */
-export function runningTotals(events) {
+/** A day's `session.cost` events reduced to the latest entry per session key -- the boot-time seed for `state.runningTotals` (spec: "the server's day-seed function"). */
+export function daySeed(events) {
   let totals = {};
   for (const ev of events ?? []) totals = foldCost(totals, ev);
   return totals;
@@ -42,9 +45,4 @@ export function runningTotalFor(totals, { agent, session }) {
 /** The manager's own running total -- the one lookup flow.mjs and pipeline.mjs both defer to, so they can't drift apart. */
 export function managerRunningTotal(state) {
   return runningTotalFor(state.runningTotals, { agent: 'manager', session: state.managerSessionId });
-}
-
-/** `state.runningTotals` turned back into the `session.cost` events a newly-connected scene needs. */
-export function costEvents(totals) {
-  return Object.values(totals ?? {});
 }
