@@ -190,7 +190,7 @@ export class Flow {
         this.#detectFeature();
         this.setPhase('implement');
         this.refreshBoard();
-        this.emit(make('agent.say', { agent: 'manager', text: 'บอร์ดพร้อมแล้ว ใบที่เรืองแสงหยิบได้ทันที (ทีมลงมือจริงในเฟส 2 ของ roadmap)' }));
+        this.emit(make('agent.say', { agent: 'manager', text: 'บอร์ดพร้อมแล้ว ทีมจะหยิบใบที่เรืองแสงไปทำทันที' }));
         break;
       case 'done':
         this.setPhase('done');

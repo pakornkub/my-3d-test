@@ -19,6 +19,8 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@playwright/mcp": "^0.0.80",
+    "playwright": "^1.63.0",
     "vite": "^8.3.0"
   }
 }

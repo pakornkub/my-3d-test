@@ -17,6 +17,9 @@ import { readOffice } from './office.mjs';
 import { Approvals } from './permissions.mjs';
 import { Flow } from './flow.mjs';
 import { runChecks, stepsWith, allRequiredPassed } from './onboard.mjs';
+import { Pipeline } from './pipeline.mjs';
+import { mergeFeatureToMain, featureBranch } from './worktree.mjs';
+import { teamHash } from './team.mjs';
 
 const PORT = Number(process.env.OFFICE_PORT ?? 5181);
 const VERSION = 'ube-office-server/0.1';
@@ -28,6 +31,7 @@ const clients = new Set();
 let project = currentProject(reg);
 let st = project ? state.load(project.id) : null;
 let flow = null;
+let pipeline = null;
 let onboarding = false;
 
 function broadcast(ev) {
@@ -50,10 +54,26 @@ async function activate(p) {
   st = state.load(p.id);
   reg.current = p.id;
   saveRegistry(reg);
-  flow = new Flow({ project: p, state: st, team, office: readOffice(p.path), emit: broadcast, approvals, save: saveState });
+  await pipeline?.stop();
+  const office = readOffice(p.path);
+  flow = new Flow({ project: p, state: st, team, office, emit: broadcast, approvals, save: saveState });
+  st.teamHash = teamHash();
+  pipeline = new Pipeline({ project: p, state: st, team, office, emit: broadcast, approvals, save: saveState,
+    manager: async (text) => { await flow.turn(text, { ask: false }); return flow.manager?.lastText ?? ''; } });
   broadcast(projectStatus());
   broadcast(make('flow.phase', { phase: st.phase, feature: st.feature }));
   flow.refreshBoard();
+  maybeStartPipeline();
+}
+
+/** The downstream half runs whenever there is a feature with tickets and the flow is past to-tickets. */
+function maybeStartPipeline() {
+  if (!flow || !pipeline) return;
+  if (st.phase === 'implement' && st.feature) {
+    pipeline.office = readOffice(project.path);
+    pipeline.start();
+    console.info(`[pipeline] running on ${st.feature}`);
+  }
 }
 
 function projectStatus() {
@@ -149,8 +169,16 @@ async function handle(msg, ws) {
       flow?.onFlowAnswer(msg.askId, msg).catch((e) => broadcast(make('error', { message: e.message })));
       break;
     case 'flow.next':
-      flow?.onNext(msg.phase).catch((e) => broadcast(make('error', { message: e.message })));
+      flow?.onNext(msg.phase).then(() => maybeStartPipeline()).catch((e) => broadcast(make('error', { message: e.message })));
       break;
+    case 'merge': {
+      if (!project || !st.feature) break;
+      const r = mergeFeatureToMain(project.path, st.feature, project.mainBranch);
+      broadcast(make('agent.say', { agent: 'manager', text: r.ok
+        ? `รวม ${featureBranch(st.feature)} เข้า ${project.mainBranch} แล้ว`
+        : `รวมไม่ได้: ${r.error}` }));
+      break;
+    }
     case 'answer':
       if (!approvals.answer(msg.askId, msg.allow)) console.warn('[server] no pending ask', msg.askId);
       break;
@@ -205,4 +233,4 @@ if (project) {
   console.info('no project yet: add one from the panel (แท็บ โปรเจกต์) or create server/projects.json');
 }
 
-process.on('SIGINT', async () => { await flow?.close(); process.exit(0); });
+process.on('SIGINT', async () => { await pipeline?.stop(); await flow?.close(); process.exit(0); });

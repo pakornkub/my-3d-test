@@ -17,6 +17,11 @@ export const DEFAULTS = {
     'daily-budget-usd': '10',
     'stall-minutes': '6',
     'max-turns': '60',
+    'max-parallel': '2',        // implementers working at once
+    'ticket-timeout-min': '30', // one implementer turn may not run longer than this
+    'ticket-budget-usd': '4',   // per session
+    'fix-rounds': '3',          // gate/review/verify fix loops before escalating
+    'attempts': '2',            // fresh sessions per ticket before escalating
   },
 };
 

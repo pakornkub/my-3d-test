@@ -15,7 +15,7 @@ db-per-worktree: none    # none | sqlite-file | postgres-docker | shared
 env-template: 
 
 ## Policy
-verify: scripted    # none | scripted | exploratory
+verify: exploratory    # none | scripted | exploratory
 bash-allowlist: npm, npx, node, git status, git diff, git log, git add, git commit    # คั่นด้วย , จับคู่ตามคำขึ้นต้น
 daily-budget-usd: 10
 stall-minutes: 6

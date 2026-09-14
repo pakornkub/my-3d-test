@@ -1,0 +1,503 @@
+// pipeline.mjs -- the downstream half of the flow: tickets off the board, through
+// implement -> gates -> review -> verify -> close, one fresh session per step.
+//
+//   frontier ticket ──claim──► worktree ──► implementer session (/implement)
+//        │                                     │ gates (server runs test/typecheck/e2e)
+//        │                                     │ reviewer session (/code-review)  ─┐ fail: back to
+//        │                                     │ QA session (opens the real thing) ─┘ the implementer
+//        │                                     ▼
+//        └── escalate (ready-for-human) ◄── retries exhausted     close: merge into feature branch,
+//                                                                 report, rebase the others
+//
+// Everything a human would want to know is an event; everything that must survive a
+// restart is in state.jobs. The harness, not the model, decides when a ticket is done.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { make } from '../src/agents/events.js';
+import { Session } from './runner.mjs';
+import { readBoard, claimTicket, setTicketField, appendComment } from './board.mjs';
+import { runGates } from './gates.mjs';
+import { ticketReport, validateReport, featureReportPrompt } from './report.mjs';
+import * as wt from './worktree.mjs';
+import { STATE_DIR } from './state.mjs';
+
+const IMPLEMENTERS = ['eng_m1', 'eng_f1', 'eng_m2'];
+const REVIEWER = 'eng_f2';
+const QA = 'eng_m3';
+const SPECIALTY = {
+  eng_m1: [/\bsrc\/(?!agents\/events)/, /\.css\b/, /index\.html/, /roster|panel|director|bubble|three/i],
+  eng_f1: [/\bserver\//, /\bscripts\//, /\bblender\//, /runner|state\.mjs|flow\.mjs|office\.mjs/],
+  eng_m2: [/\bmock\.js/, /\btests?\//, /research|prototype/i],
+};
+const PLUGIN = 'mattpocock-skills';
+
+const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+const tail = (s, n = 1200) => (s && s.length > n ? '…' + s.slice(-n) : s ?? '');
+
+/** Find any installed skill's SKILL.md body: "plugin:skill" or a bare skill name. */
+export function findSkillBody(name) {
+  const cache = path.join(os.homedir(), '.claude', 'plugins', 'cache');
+  const [plugin, skill] = name.includes(':') ? name.split(':') : [null, name];
+  const roots = [];
+  if (fs.existsSync(cache)) {
+    for (const mk of fs.readdirSync(cache)) {
+      const mkDir = path.join(cache, mk);
+      if (!fs.statSync(mkDir).isDirectory()) continue;
+      for (const pl of fs.readdirSync(mkDir)) {
+        if (plugin && pl !== plugin) continue;
+        const plDir = path.join(mkDir, pl);
+        if (!fs.statSync(plDir).isDirectory()) continue;
+        for (const ver of fs.readdirSync(plDir).sort().reverse()) roots.push(path.join(plDir, ver, 'skills'));
+      }
+    }
+  }
+  roots.push(path.join(os.homedir(), '.claude', 'skills'));
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    const direct = path.join(root, skill, 'SKILL.md');
+    if (fs.existsSync(direct)) return strip(fs.readFileSync(direct, 'utf8'));
+    for (const group of fs.readdirSync(root)) {
+      const f = path.join(root, group, skill, 'SKILL.md');
+      if (fs.existsSync(f)) return strip(fs.readFileSync(f, 'utf8'));
+    }
+  }
+  return null;
+  function strip(t) { return t.replace(/^---[\s\S]*?---\s*/, '').trim(); }
+}
+
+// ---------------------------------------------------------------- parsing the agents' last words
+export function parseImplementResult(text = '') {
+  const result = /RESULT:\s*(done|blocked|fail)/i.exec(text)?.[1]?.toLowerCase() ?? (text ? 'done' : 'blocked');
+  const evidence = /EVIDENCE:\s*(.+)/i.exec(text)?.[1]?.trim() ?? '';
+  const next = /NEXT:\s*(.+)/i.exec(text)?.[1]?.trim() ?? '';
+  const before = text.split(/RESULT:/i)[0];
+  const bullets = [...before.matchAll(/^\s*[-*]\s+(.+)$/gm)].map((m) => m[1].trim()).filter((b) => b.length > 3).slice(0, 5);
+  const what = bullets.length ? bullets : before.trim().split(/\n+/).filter(Boolean).slice(0, 2);
+  return { result, evidence, next, what };
+}
+
+export function parseReviewResult(text = '') {
+  const verdict = /VERDICT:\s*(pass|fail)/i.exec(text)?.[1]?.toLowerCase() ?? 'fail';
+  const list = (key) => {
+    const raw = new RegExp(`${key}:\\s*(.+)`, 'i').exec(text)?.[1]?.trim() ?? '';
+    return /^none\b/i.test(raw) || !raw ? [] : raw.split(/\s*;\s*/).filter(Boolean);
+  };
+  return { verdict, standards: list('STANDARDS'), spec: list('SPEC') };
+}
+
+export function parseVerifyResult(text = '', criteria = []) {
+  const verdict = /VERDICT:\s*(pass|fail)/i.exec(text)?.[1]?.toLowerCase() ?? 'fail';
+  const repro = /REPRO:\s*([\s\S]+?)(?:\n\s*\n|$)/i.exec(text)?.[1]?.trim() ?? '';
+  const rows = [...text.matchAll(/CRITERION\s+(\d+):\s*(pass|fail|skip)\s*[—-]?\s*(.*)/gi)];
+  const out = criteria.map((c, i) => {
+    const r = rows.find((m) => Number(m[1]) === i + 1);
+    return { text: c.text, pass: r ? /pass/i.test(r[2]) : verdict === 'pass', note: r?.[3]?.trim() ?? '' };
+  });
+  return { verdict, criteria: out, repro, evidence: /EVIDENCE:\s*(.+)/i.exec(text)?.[1]?.trim() ?? '' };
+}
+
+/** Which idle implementer fits this ticket best: specialty hits in the ticket text, then order. */
+export function pickImplementer(ticketText, idle) {
+  let best = null;
+  for (const id of idle) {
+    const score = (SPECIALTY[id] ?? []).reduce((n, re) => n + (re.test(ticketText) ? 1 : 0), 0);
+    if (!best || score > best.score) best = { id, score };
+  }
+  return best?.id ?? null;
+}
+
+class Mutex {
+  constructor() { this.p = Promise.resolve(); }
+  run(fn) { const r = this.p.then(fn, fn); this.p = r.catch(() => {}); return r; }
+}
+
+// ---------------------------------------------------------------- the pipeline
+export class Pipeline {
+  constructor({ project, state, team, office, emit, approvals, save, manager, createSession = (o) => new Session(o) }) {
+    this.project = project;
+    this.state = state;
+    this.team = team;
+    this.office = office;
+    this.emit = emit;
+    this.approvals = approvals;
+    this.save = save;
+    this.managerTurn = manager;          // async (text) => lastText ; the manager's session, for the feature report
+    this.createSession = createSession;
+    this.running = new Map();            // ticket id -> { agent, promise }
+    this.locks = { [REVIEWER]: new Mutex(), [QA]: new Mutex() };
+    this.active = false;
+    this.slot = 0;
+    this.reported = false;
+  }
+
+  get repo() { return this.project.path; }
+  get feature() { return this.state.feature; }
+  get policy() { return this.office?.policy ?? {}; }
+  get commands() { return this.office?.commands ?? {}; }
+
+  start() {
+    if (this.active) return;
+    this.active = true;
+    this.reported = false;
+    this.#resume();
+    this.tick();
+    this.timer = setInterval(() => this.tick(), 15_000);
+  }
+
+  async stop() {
+    this.active = false;
+    clearInterval(this.timer);
+    for (const r of this.running.values()) r.session?.close?.();
+    this.running.clear();
+  }
+
+  /** Jobs that were mid-flight when the server died get a fresh attempt with a note. */
+  #resume() {
+    for (const [id, job] of Object.entries(this.state.jobs ?? {})) {
+      if (job.stage && job.stage !== 'done' && job.stage !== 'escalated') {
+        job.resume = `server restart ระหว่างขั้น ${job.stage} รอบ ${job.attempt}: worktree อาจมีงานค้าง ดู git status/log ก่อน`;
+        job.stage = 'pending';
+        this.save();
+      }
+    }
+  }
+
+  board() { return this.feature ? readBoard(this.repo, this.feature) : []; }
+
+  emitBoard() {
+    this.emit(make('board.update', { feature: this.feature, tickets: this.board().map(({ file, ...t }) => t) }));
+  }
+
+  /** Assign frontier tickets to idle implementers, up to max-parallel. */
+  tick() {
+    if (!this.active || !this.feature) return;
+    const tickets = this.board();
+    const done = new Set(tickets.filter((t) => t.status === 'done').map((t) => t.id));
+    const maxPar = num(this.policy['max-parallel'], 2);
+    // in-progress tickets nobody is running (claimed before a restart) count as work to resume
+    const resumable = tickets.filter((t) => t.status === 'in-progress' && !this.running.has(t.id));
+    const frontier = tickets.filter((t) => t.status === 'ready' && !t.assignee && (t.blockedBy ?? []).every((b) => done.has(b)));
+    for (const t of [...resumable, ...frontier]) {
+      if (this.running.size >= maxPar) break;
+      const busy = new Set([...this.running.values()].map((r) => r.agent));
+      const idle = IMPLEMENTERS.filter((a) => !busy.has(a));
+      if (!idle.length) break;
+      const text = fs.readFileSync(t.file, 'utf8');
+      const agent = (t.assignee && idle.includes(t.assignee)) ? t.assignee : pickImplementer(text, idle);
+      if (!agent) break;
+      const job = { agent };
+      this.running.set(t.id, job);
+      job.promise = this.runTicket(t, agent, job).catch((e) => {
+        this.emit(make('error', { agent, ticket: t.id, message: `pipeline: ${e.message ?? e}` }));
+        this.#escalate(t, `pipeline error: ${tail(String(e.stack ?? e), 400)}`);
+      }).finally(() => { this.running.delete(t.id); this.tick(); this.#maybeFeatureReport(); });
+    }
+    if (!this.running.size) this.#maybeFeatureReport();
+  }
+
+  // ---------------------------------------------------------------- one ticket
+  async runTicket(t, agent, job) {
+    const id = t.id;
+    const st = this.state.jobs[id] ?? (this.state.jobs[id] = { agent, attempt: 0, stage: 'pending', usd: 0, startedAt: Date.now() });
+    st.agent = agent;
+    st.attempt += 1;
+    const maxAttempts = num(this.policy.attempts, 2);
+    if (st.attempt > maxAttempts) { this.#escalate(t, `เกิน ${maxAttempts} รอบ`); return; }
+    const note = st.resume ?? st.retryNote ?? null;
+    delete st.resume; delete st.retryNote;
+    st.stage = 'implement';
+    this.save();
+
+    claimTicket(t.file, agent);
+    setTicketField(t.file, 'Attempt', String(st.attempt));
+    this.emitBoard();
+
+    // worktree from the feature branch (a retry keeps the previous branch tip for forensics)
+    const w = wt.createTicketWorktree(this.repo, this.feature, id, { mainBranch: this.project.mainBranch, attempt: st.attempt, commands: this.commands });
+    st.branch = w.branch; st.worktree = w.path; this.save();
+
+    if (st.attempt > 1) this.emit(make('agent.retry', { agent, ticket: id, attempt: st.attempt, note: note ?? 'เริ่มรอบใหม่' }));
+    this.emit(make('agent.start', { agent, ticket: id, brief: t.title, mode: 'implement', attempt: st.attempt, teamHash: this.state.teamHash ?? null }));
+
+    const ticketText = fs.readFileSync(t.file, 'utf8');
+    const session = this.#session(agent, { cwd: w.path, ticket: id, role: 'impl' });
+    job.session = session;
+    session.start();
+    const t0 = Date.now();
+
+    const implementPrompt = [
+      this.#skill('implement'),
+      '',
+      `## Ticket ${id}: ${t.title}`,
+      `ไฟล์ ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')}`,
+      `spec: .scratch/${this.feature}/spec.md`,
+      `worktree นี้อยู่บน branch ${w.branch} (แตกจาก ${w.feature}) commit ที่นี่เท่านั้น ห้าม push`,
+      note ? `\nหมายเหตุจากรอบก่อน: ${note}` : '',
+      '',
+      ticketText,
+    ].join('\n');
+    let res = await session.send(implementPrompt);
+    let parsed = parseImplementResult(session.lastText);
+    if (res?.ended || session.timedOut || res?.subtype?.startsWith('error')) {
+      st.retryNote = `รอบ ${st.attempt} ${session.timedOut ? 'หมดเวลา' : 'session จบผิดปกติ'} ข้อความสุดท้าย: ${tail(session.lastText, 300)}`;
+      session.close();
+      this.save();
+      return this.#retryOrEscalate(t, agent, job);
+    }
+    this.emit(make('agent.done', { agent, ticket: id, result: parsed.result, summary: parsed.evidence || parsed.what.join(' · ') || '(ไม่มีสรุป)' }));
+    if (parsed.result !== 'done') {
+      st.retryNote = `รอบ ${st.attempt} รายงาน ${parsed.result}: ${parsed.next || tail(session.lastText, 300)}`;
+      session.close();
+      this.save();
+      return this.#retryOrEscalate(t, agent, job);
+    }
+
+    // ---- fix loop: gates -> review -> verify, each failure goes back to the same session
+    const maxRounds = num(this.policy['fix-rounds'], 3);
+    let gates = [], review = null, verify = null, rounds = 0;
+    for (;;) {
+      st.stage = 'gates'; this.save();
+      gates = await runGates(w.path, this.commands, { onResult: (g, r) => this.emit(make('gate.result', { agent, ticket: id, gate: g, pass: r.pass, output: tail(r.output, 600) })) });
+      const failedGates = gates.filter((g) => !g.pass);
+      let feedback = null;
+      if (failedGates.length) {
+        feedback = `gate ที่ server รันเองไม่ผ่าน:\n` + failedGates.map((g) => `### ${g.gate}: ${g.command}\n${tail(g.output, 1500)}`).join('\n\n') + '\n\nแก้ให้ผ่านแล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง';
+      } else {
+        st.stage = 'review'; this.save();
+        review = await this.#review(t, w);
+        if (review.verdict !== 'pass') {
+          feedback = `reviewer ส่งกลับ:\nSTANDARDS: ${review.standards.join('; ') || 'none'}\nSPEC: ${review.spec.join('; ') || 'none'}\n\nแก้ตาม finding แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
+        } else if (this.policy.verify !== 'none') {
+          st.stage = 'verify'; this.save();
+          verify = await this.#verify(t, w);
+          if (verify.verdict !== 'pass') {
+            feedback = `QA ตรวจรับไม่ผ่าน (${verify.criteria.filter((c) => !c.pass).length} ข้อ):\n` + verify.criteria.filter((c) => !c.pass).map((c) => `- ${c.text}${c.note ? ' — ' + c.note : ''}`).join('\n') + `\n\nREPRO: ${verify.repro || '-'}\n\nแก้แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
+          }
+        }
+      }
+      if (!feedback) break;
+      rounds += 1;
+      if (rounds > maxRounds) {
+        st.retryNote = `แก้ ${maxRounds} รอบแล้วยังไม่ผ่าน: ${tail(feedback, 300)}`;
+        session.close();
+        this.save();
+        return this.#retryOrEscalate(t, agent, job);
+      }
+      this.emit(make('agent.start', { agent, ticket: id, brief: `${t.title} (แก้รอบ ${rounds})`, mode: 'implement', attempt: st.attempt }));
+      st.stage = 'implement'; this.save();
+      res = await session.send(feedback);
+      parsed = parseImplementResult(session.lastText);
+      if (res?.ended || session.timedOut) {
+        st.retryNote = `รอบแก้ ${rounds} ${session.timedOut ? 'หมดเวลา' : 'session จบผิดปกติ'}`;
+        session.close();
+        this.save();
+        return this.#retryOrEscalate(t, agent, job);
+      }
+      this.emit(make('agent.done', { agent, ticket: id, result: parsed.result, summary: parsed.evidence || parsed.what.join(' · ') }));
+    }
+
+    // ---- close: merge, report, board
+    st.stage = 'close'; this.save();
+    const usd = session.costUsd + (review?.usd ?? 0) + (verify?.usd ?? 0);
+    st.usd = usd;
+    const commits = wt.ticketCommits(this.repo, this.feature, id);
+    if (!commits.length) {
+      // nothing committed: ask once for a commit, then escalate
+      await session.send('ยังไม่มี commit บน branch นี้ ให้ git add และ git commit งานทั้งหมดตอนนี้ แล้วตอบสั้นๆ');
+      if (!wt.ticketCommits(this.repo, this.feature, id).length) {
+        session.close();
+        return this.#escalate(t, 'implementer ไม่ได้ commit งาน');
+      }
+    }
+    const merge = wt.mergeTicket(this.repo, this.feature, id, { mainBranch: this.project.mainBranch, message: `Merge ticket ${id}: ${t.title}` });
+    if (!merge.ok) {
+      session.close();
+      return this.#escalate(t, `merge เข้า ${wt.featureBranch(this.feature)} ชนกันที่: ${merge.files.join(', ') || merge.error}`);
+    }
+    const diff = wt.diffStat(this.repo, this.project.mainBranch, wt.featureBranch(this.feature));
+    const report = ticketReport({
+      id, title: t.title, agent, branch: w.branch, attempt: st.attempt, ms: Date.now() - t0, usd,
+      what: parsed.what, gates, review, verify, criteria: t.criteria,
+      open: [parsed.next && !/none|ไม่มี/i.test(parsed.next) ? `implementer: ${parsed.next}` : null].filter(Boolean),
+      diffStat: wt.diffStat(this.repo, wt.featureBranch(this.feature), w.branch) || diff,
+    });
+    const errs = validateReport(report, 1);
+    if (errs.length) console.warn('[pipeline] level-1 report invalid', errs);
+    setTicketField(t.file, 'Status', 'done');
+    for (const c of verify?.criteria ?? []) if (c.pass) {
+      const re = new RegExp(`^- \\[ \\] ${c.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm');
+      const txt = fs.readFileSync(t.file, 'utf8');
+      if (re.test(txt)) fs.writeFileSync(t.file, txt.replace(re, `- [x] ${c.text}`));
+    }
+    appendComment(t.file, report);
+    st.stage = 'done'; st.finishedAt = Date.now(); this.save();
+    this.#metrics({ ticket: id, agent, attempts: st.attempt, rounds, gates: gates.map((g) => [g.gate, g.pass]), review: review?.verdict, verify: verify?.verdict, ms: Date.now() - t0, usd, escalated: false });
+    this.emit(make('ticket.closed', { ticket: id, assignee: agent, report, diffStat: diff }));
+    session.close();
+    this.emitBoard();
+    // keep the others current with what just landed
+    const open = this.board().filter((x) => x.status === 'in-progress').map((x) => x.id);
+    for (const r of wt.rebaseOpenTickets(this.repo, this.feature, id, open)) {
+      if (!r.ok) this.emit(make('agent.say', { agent: 'manager', ticket: r.id, text: `ใบ ${r.id} rebase ทับ ${wt.featureBranch(this.feature)} ไม่ผ่าน (${r.reason}) ต้องแก้เอง` }));
+    }
+    wt.removeTicketWorktree(this.repo, this.feature, id, { keepBranch: true });
+  }
+
+  // ---------------------------------------------------------------- steps
+  async #review(t, w) {
+    return this.locks[REVIEWER].run(async () => {
+      this.emit(make('agent.start', { agent: REVIEWER, ticket: t.id, brief: `รีวิว diff ใบ ${t.id}`, mode: 'review' }));
+      const s = this.#session(REVIEWER, { cwd: w.path, ticket: t.id, role: 'review' });
+      s.start();
+      const prompt = [
+        this.#skill('code-review'),
+        '',
+        `fixed point: ${w.feature} (git diff ${w.feature}...HEAD)`,
+        `spec: .scratch/${this.feature}/spec.md · ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')}`,
+        'มาตรฐานของ repo: CLAUDE.md, CONTEXT.md, docs/adr/',
+        'ห้ามแก้โค้ด รายงานอย่างเดียว จบด้วยสามบรรทัด VERDICT / STANDARDS / SPEC ตาม prompt ประจำตัวของคุณ',
+      ].join('\n');
+      await s.send(prompt);
+      const r = parseReviewResult(s.lastText);
+      r.usd = s.costUsd;
+      s.close();
+      this.emit(make('review.result', { agent: REVIEWER, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, standards: r.standards, spec: r.spec, verdict: r.verdict }));
+      return r;
+    });
+  }
+
+  async #verify(t, w) {
+    return this.locks[QA].run(async () => {
+      this.emit(make('agent.start', { agent: QA, ticket: t.id, brief: `ตรวจรับใบ ${t.id} (${t.criteria.length} ข้อ)`, mode: 'verify' }));
+      const exploratory = this.policy.verify === 'exploratory';
+      let dev = null;
+      if (exploratory && this.commands.dev) {
+        const port = num(this.office?.worktree?.['port-base'], 3100) + 1 + (this.slot++ % 40);
+        dev = await wt.startDevServer(this.commands.dev, w.path, port);
+        if (!dev) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `dev server ไม่ขึ้นที่ :${port} ตรวจได้เฉพาะแบบ scripted` }));
+      }
+      const mcp = exploratory ? { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless', '--browser', 'chromium'] } } : undefined;
+      const s = this.#session(QA, { cwd: w.path, ticket: t.id, role: 'qa', mcp });
+      s.start();
+      const criteria = t.criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
+      const prompt = [
+        `ตรวจรับใบ ${t.id}: ${t.title}`,
+        `ไฟล์ ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')} · spec: .scratch/${this.feature}/spec.md`,
+        `โหมด: ${this.policy.verify}` + (dev ? ` · หน้าเว็บของ worktree นี้เปิดอยู่ที่ ${dev.url} (ใช้เครื่องมือ playwright: navigate, click, evaluate, screenshot)` : ''),
+        `คำสั่งที่รันได้: ${Object.entries(this.commands).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')}`,
+        '',
+        'Acceptance criteria:',
+        criteria,
+        '',
+        'ทำทีละข้อ เก็บหลักฐานลง .scratch/' + this.feature + '/issues/' + t.id + '/verify/ (สร้างโฟลเดอร์ได้)',
+        'ข้อที่ต้องใช้เบราว์เซอร์แต่ไม่มีเบราว์เซอร์ให้ตอบ skip พร้อมเหตุผล ไม่ใช่ fail',
+        'จบด้วยบรรทัดต่อข้อ "CRITERION n: pass|fail|skip — หลักฐานสั้นๆ" แล้วตามด้วย VERDICT / CRITERIA / REPRO (VERDICT เป็น fail เมื่อมีข้อใด fail)',
+      ].join('\n');
+      await s.send(prompt);
+      const r = parseVerifyResult(s.lastText, t.criteria);
+      r.usd = s.costUsd;
+      s.close();
+      dev?.stop();
+      this.emit(make('verify.result', { agent: QA, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, criteria: r.criteria, verdict: r.verdict, repro: r.repro }));
+      return r;
+    });
+  }
+
+  #retryOrEscalate(t, agent, job) {
+    const st = this.state.jobs[t.id];
+    const maxAttempts = num(this.policy.attempts, 2);
+    if (st.attempt >= maxAttempts) return this.#escalate(t, st.retryNote ?? 'หมดรอบ');
+    st.stage = 'pending'; this.save();
+    // the tick picks it up again as an in-progress ticket assigned to the same person
+    this.emit(make('agent.say', { agent, ticket: t.id, text: `ใบ ${t.id} จะเริ่มรอบ ${st.attempt + 1} ด้วย session ใหม่` }));
+  }
+
+  #escalate(t, reason) {
+    const st = this.state.jobs[t.id] ?? (this.state.jobs[t.id] = {});
+    st.stage = 'escalated'; st.reason = reason; this.save();
+    setTicketField(t.file, 'Status', 'ready-for-human');
+    appendComment(t.file, `> *ส่งต่อให้คนโดย Office Server*\n\n${reason}`);
+    this.#metrics({ ticket: t.id, agent: st.agent, attempts: st.attempt, escalated: true, reason, usd: st.usd ?? 0 });
+    this.emit(make('ticket.escalated', { ticket: t.id, reason, agent: st.agent }));
+    this.emitBoard();
+  }
+
+  // ---------------------------------------------------------------- feature report
+  async #maybeFeatureReport() {
+    if (!this.active || this.reported || this.running.size) return;
+    const tickets = this.board();
+    if (!tickets.length) return;
+    const open = tickets.filter((t) => ['ready', 'blocked', 'in-progress', 'review', 'verify'].includes(t.status));
+    if (open.length) return;
+    this.reported = true;
+    const costs = {};
+    for (const [id, j] of Object.entries(this.state.jobs)) {
+      const k = j.agent ?? 'unknown';
+      costs[k] = costs[k] ?? { sessions: 0, usd: 0 };
+      costs[k].sessions += j.attempt ?? 1;
+      costs[k].usd += j.usd ?? 0;
+    }
+    costs.manager = { sessions: 1, usd: this.state.costUsd ?? 0 };
+    const branch = wt.featureBranch(this.feature);
+    const diff = wt.diffStat(this.repo, this.project.mainBranch, branch);
+    const prompt = featureReportPrompt({
+      feature: this.feature, project: this.project.id, branch,
+      tickets: tickets.map((t) => ({ id: t.id, title: t.title, assignee: t.assignee, status: t.rawStatus,
+        review: this.state.jobs[t.id]?.stage === 'done' ? 'ผ่าน' : this.state.jobs[t.id]?.stage ?? '-',
+        verify: this.state.jobs[t.id]?.stage === 'done' ? 'ผ่าน' : '-' })),
+      costs, diffStat: diff, spec: `.scratch/${this.feature}/spec.md`,
+    });
+    let report = await this.managerTurn(prompt);
+    let errs = validateReport(report ?? '', 2);
+    if (errs.length) {
+      report = await this.managerTurn(`รายงานยังไม่ตรง template: ${errs.join(', ')} เขียนใหม่ทั้งฉบับให้ครบ 7 หัวข้อตามลำดับ`);
+      errs = validateReport(report ?? '', 2);
+    }
+    this.emit(make('feature.report', { feature: this.feature, report: report ?? '(ไม่มีรายงาน)', valid: !errs.length, diffStat: diff }));
+    const pr = wt.openPullRequest(this.repo, this.feature, { mainBranch: this.project.mainBranch, title: `feature: ${this.feature}`, body: report ?? '' });
+    if (pr.ok) this.emit(make('ci.status', { pr: pr.url, state: 'opened' }));
+    else this.emit(make('agent.say', { agent: 'manager', text: `ไม่ได้เปิด PR: ${pr.error} รวมเข้า ${this.project.mainBranch} ได้ด้วยปุ่ม merge ในแผง` }));
+  }
+
+  // ---------------------------------------------------------------- helpers
+  #session(agent, { cwd, ticket, role, mcp }) {
+    const a = this.team[agent];
+    const pol = this.policy;
+    const preload = (a.skills ?? []).map((s) => {
+      const body = findSkillBody(s);
+      return body ? `\n\n## Skill: ${s}\n${body}` : '';
+    }).join('');
+    const append = `${a.prompt}\n\n## โปรเจกต์นี้\nrepo: ${this.repo} · worktree: ${cwd}\nอ่าน CLAUDE.md, CONTEXT.md และ docs/adr/ ก่อนเริ่ม${preload}`;
+    const allowed = ['Read', 'Grep', 'Glob', 'Skill', 'TodoWrite', ...(mcp ? ['mcp__playwright__*'] : [])];
+    return this.createSession({
+      agent, emit: this.emit, ticket,
+      stallMinutes: num(pol['stall-minutes'], 6),
+      timeoutMinutes: num(pol['ticket-timeout-min'], 30),
+      options: {
+        cwd, model: a.model,
+        systemPrompt: { type: 'preset', preset: 'claude_code', append },
+        settingSources: ['user', 'project'],
+        allowedTools: allowed,
+        permissionMode: 'default',
+        canUseTool: this.approvals.canUseToolFor({ agent, repo: cwd, policy: pol, role, ticket }),
+        maxTurns: num(pol['max-turns'], 60),
+        maxBudgetUsd: num(pol['ticket-budget-usd'], 4),
+        ...(mcp ? { mcpServers: mcp } : {}),
+        env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+      },
+    });
+  }
+
+  #skill(name) {
+    return findSkillBody(`${PLUGIN}:${name}`) ?? `/${PLUGIN}:${name}`;
+  }
+
+  #metrics(row) {
+    try {
+      fs.mkdirSync(STATE_DIR, { recursive: true });
+      fs.appendFileSync(path.join(STATE_DIR, 'metrics.jsonl'), JSON.stringify({ t: Date.now(), project: this.project.id, feature: this.feature, ...row }) + '\n');
+    } catch { /* metrics are best-effort */ }
+  }
+}

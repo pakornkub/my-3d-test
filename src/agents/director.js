@@ -303,7 +303,7 @@ export class Director {
     this.gather({ except: ['manager'] });
     this.places.highlight?.('TV');
     this.panel.report?.({ level: 2, feature: ev.feature, markdown: ev.report });
-    this.panel.tv?.({ title: `รายงานปิดงาน: ${ev.feature}`, markdown: ev.report });
+    this.panel.tv?.({ title: `รายงานปิดงาน: ${ev.feature}`, markdown: ev.report, merge: { branch: `feature/${ev.feature}`, mainBranch: ev.mainBranch ?? 'main' } });
   }
 
   on_session_cost(ev) { this.panel.cost?.(ev); }

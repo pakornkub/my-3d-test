@@ -43,11 +43,15 @@ export class Session {
    *                 disallowedTools, permissionMode, canUseTool, settingSources, skills,
    *                 mcpServers, maxTurns, maxBudgetUsd, resume, env
    */
-  constructor({ agent, emit, onFile = () => {}, stallMinutes = 6, options = {} }) {
+  constructor({ agent, emit, onFile = () => {}, stallMinutes = 6, timeoutMinutes = 0, ticket = null, options = {} }) {
     this.agent = agent;
     this.emit = emit;
     this.onFile = onFile;
     this.stallMs = stallMinutes * 60_000;
+    this.timeoutMs = timeoutMinutes * 60_000;     // 0 = no hard limit
+    this.ticket = ticket;
+    this.turnStarted = 0;
+    this.timedOut = false;
     this.options = options;
     this.sessionId = options.resume ?? null;
     this.costUsd = 0;
@@ -77,6 +81,8 @@ export class Session {
     this.queue.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
     this.busy = true;
     this.stalledFlag = false;
+    this.timedOut = false;
+    this.turnStarted = Date.now();
     this.lastActivity = Date.now();
     this.wake?.();
     return new Promise((resolve) => this.turnWaiters.push(resolve));
@@ -115,7 +121,15 @@ export class Session {
   }
 
   #checkStall() {
-    if (!this.busy || this.stalledFlag) return;
+    if (!this.busy) return;
+    if (this.timeoutMs && !this.timedOut && Date.now() - this.turnStarted > this.timeoutMs) {
+      // a hard ceiling per turn: interrupt, and let the caller decide on a retry
+      this.timedOut = true;
+      this.emit(make('agent.stalled', { agent: this.agent, ticket: this.ticket ?? null, minutes: Math.round(this.timeoutMs / 60_000), reason: 'timeout' }));
+      this.interrupt();
+      return;
+    }
+    if (this.stalledFlag) return;
     if (Date.now() - this.lastActivity > this.stallMs) {
       this.stalledFlag = true;
       this.emit(make('agent.stalled', { agent: this.agent, ticket: this.ticket ?? null, minutes: Math.round(this.stallMs / 60_000) }));

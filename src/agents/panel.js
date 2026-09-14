@@ -15,7 +15,7 @@ const COLS = [
 
 const NEXT_OF = { grill: ['spec', 'เขียนสเปก'], spec: ['tickets', 'แตกเป็น ticket'], tickets: ['implement', 'ให้ทีมลงมือ'], implement: ['done', 'ปิดงาน'] };
 
-export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock, onTab, onNext, onProjectAdd, onProjectSelect, onRecheck, onCancel }) {
+export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock, onTab, onNext, onProjectAdd, onProjectSelect, onRecheck, onCancel, onMerge }) {
   const root = document.getElementById('panel');
   const tabs = root.querySelector('.tabs');
   const sections = Object.fromEntries([...root.querySelectorAll('section[data-tab]')].map((s) => [s.dataset.tab, s]));
@@ -399,11 +399,21 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
   renderProjectHome();
 
   // ---------------------------------------------------------------- tv / reports
-  function tv({ title, criteria, markdown }) {
+  function tv({ title, criteria, markdown, merge }) {
     tvEl.innerHTML = '';
     const h = document.createElement('h3');
     h.textContent = title;
     tvEl.appendChild(h);
+    if (merge && live) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const b = document.createElement('button');
+      b.className = 'primary';
+      b.textContent = `รวม ${merge.branch} เข้า ${merge.mainBranch ?? 'main'}`;
+      b.addEventListener('click', () => { b.disabled = true; onMerge?.(merge.branch); });
+      row.appendChild(b);
+      tvEl.appendChild(row);
+    }
     if (criteria) {
       const ul = document.createElement('ul');
       ul.className = 'criteria';

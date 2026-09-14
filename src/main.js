@@ -112,6 +112,7 @@ async function init() {
     onAnswer: (askId, allow) => { director.answered(askId); driver.send(make('answer', { askId, allow })); },
     onNext: (phase) => driver.send(make('flow.next', { phase })),
     onCancel: () => driver.send(make('cancel')),
+    onMerge: (branch) => driver.send(make('merge', { branch })),
     onProjectAdd: ({ path, mainBranch }) => driver.send(make('project.add', { path, mainBranch })),
     onProjectSelect: (id) => driver.send(make('project.select', { project: id })),
     onRecheck: (step, action) => driver.send(make('project.recheck', { project: currentProject ?? '-', step, action })),
