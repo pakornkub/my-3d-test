@@ -88,6 +88,9 @@ body.panel-open #card { right: 400px; }
 #panel .mode { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: rgba(43, 50, 69, 0.08); color: var(--navy-soft); white-space: nowrap; }
 #panel .mode.mock { background: #fff3d6; color: #8a5a00; }
 #panel .mode.live { background: #e3f7ea; color: #1f7a48; }
+#panel .teamcost { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: rgba(43, 50, 69, 0.08); color: var(--navy-soft); white-space: nowrap; }
+#panel .teamcost.warn { background: #fff3d6; color: #8a5a00; }
+#panel .teamcost.over { background: #fde8e7; color: #a5271f; }
 #panel .panel-close { width: 26px; height: 26px; padding: 0; border: 0; background: transparent; font-size: 17px; color: var(--navy-soft); }
 #panel > section { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 #panel > section[hidden] { display: none; }
@@ -213,8 +216,6 @@ body.panel-open #card { right: 400px; }
 #panel .checklist li { grid-template-columns: 18px 1fr auto; }
 #panel .checklist li .b { grid-row: span 2; display: flex; flex-direction: column; gap: 3px; align-self: start; }
 #panel .checklist li .b button { font-size: 11px; padding: 3px 8px; }
-
-#panel .mode[data-cost]::after { content: " · " attr(data-cost); }
 
 /* multiple-choice asks */
 #panel .ask .choice { margin-bottom: 8px; }

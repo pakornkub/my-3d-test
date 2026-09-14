@@ -177,3 +177,39 @@ test('a legacy cost event with no session field is still accounted, keyed on the
   d.handle(make('session.cost', { agent: 'eng_m1', usd: 0.25 }));
   assert.equal(d.memberCost('eng_m1'), 0.25);
 });
+
+test('team cost is zero before any cost event', () => {
+  const { d } = setup();
+  assert.equal(d.teamCost(), 0);
+});
+
+test('team cost sums every session today, including an id off the roster', () => {
+  const { d } = setup();
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 0.42 }));
+  d.handle(make('session.cost', { agent: 'someone_else', session: 's9', usd: 5 }));
+  assert.equal(d.teamCost(), 5.42);
+});
+
+test('breakdown lists every agent id that has spent money, summed across its sessions', () => {
+  const { d } = setup();
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 0.9 }));
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's2', usd: 0.1 }));
+  d.handle(make('session.cost', { agent: 'someone_else', session: 's9', usd: 5 }));
+  assert.deepEqual(d.breakdown(), { eng_m1: 1, someone_else: 5 });
+});
+
+test('setBudget stores the budget and republishes the team figure to the panel', () => {
+  const { d, panel } = setup();
+  d.setBudget(10);
+  assert.equal(d.budget, 10);
+  const call = panel.calls.find(([k]) => k === 'cost');
+  assert.deepEqual(call, ['cost', { team: 0, budget: 10, breakdown: {} }]);
+});
+
+test('a session.cost event republishes team, budget and breakdown to the panel', () => {
+  const { d, panel } = setup();
+  d.setBudget(10);
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 1.5 }));
+  const call = panel.calls.filter(([k]) => k === 'cost').at(-1);
+  assert.deepEqual(call, ['cost', { team: 1.5, budget: 10, breakdown: { eng_m1: 1.5 } }]);
+});
