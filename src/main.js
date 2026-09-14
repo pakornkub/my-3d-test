@@ -135,6 +135,7 @@ async function init() {
       currentProject = e.project;
       panel.setProjects(e.projects);
       if (e.snapshot?.tickets?.length) director.handle(make('board.update', { tickets: e.snapshot.tickets }));
+      director.setBudget(e.snapshot?.dailyBudgetUsd);
       return;
     }
     if (e.type === 'project.status') currentProject = e.project;

@@ -30,6 +30,7 @@ export class Director {
     this.tickets = [];
     this.pendingAsks = new Map();   // askId -> agent id, so answers can clear the right person
     this.log = [];
+    this.budget = undefined;        // daily-budget-usd from the connection snapshot; undefined when unknown
     for (const m of crew.members) this.#set(m.id, 'idle');
   }
 
@@ -43,6 +44,30 @@ export class Director {
       if (agent === id) sum = (sum ?? 0) + usd;
     }
     return sum;
+  }
+
+  /** Team cost: the sum of the latest running totals of every session today, roster or not. */
+  teamCost() {
+    let sum = 0;
+    for (const { usd } of this.#sessions.values()) sum += usd;
+    return sum;
+  }
+
+  /** Every agent id that has spent money today, summed across its sessions -- roster or not. */
+  breakdown() {
+    const out = {};
+    for (const { agent, usd } of this.#sessions.values()) out[agent] = (out[agent] ?? 0) + usd;
+    return out;
+  }
+
+  /** The daily-budget-usd from the connection snapshot; republishes the team figure right away. */
+  setBudget(usd) {
+    this.budget = usd;
+    this.#publishCost();
+  }
+
+  #publishCost() {
+    this.panel.cost?.({ team: this.teamCost(), budget: this.budget, breakdown: this.breakdown() });
   }
 
   // ---------------------------------------------------------------- helpers
@@ -323,7 +348,7 @@ export class Director {
     if (this.#costDay !== null && day !== this.#costDay) this.#sessions.clear();
     this.#costDay = day;
     this.#sessions.set(ev.session ?? ev.agent, { agent: ev.agent, usd: ev.usd });
-    this.panel.cost?.(ev);
+    this.#publishCost();
     this.onStatus();
   }
 

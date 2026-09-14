@@ -87,3 +87,15 @@ test('a message during onboarding is refused without touching the session', asyn
   assert.equal(s.sent.length, 0);
   assert.match(events.at(-1).text, /onboarding/);
 });
+
+test('snapshot carries daily-budget-usd from the office file', () => {
+  const { flow } = setup();
+  flow.office = { policy: { 'daily-budget-usd': '5' } };
+  assert.equal(flow.snapshot().dailyBudgetUsd, 5);
+});
+
+test('snapshot has no budget when the repo has no office file', () => {
+  const { flow } = setup();
+  flow.office = null;
+  assert.equal(flow.snapshot().dailyBudgetUsd, undefined);
+});

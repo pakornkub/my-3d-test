@@ -20,6 +20,7 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
   const tabs = root.querySelector('.tabs');
   const sections = Object.fromEntries([...root.querySelectorAll('section[data-tab]')].map((s) => [s.dataset.tab, s]));
   const modeEl = root.querySelector('.mode');
+  const teamCostEl = root.querySelector('.teamcost');
   const transcriptEl = sections.chat.querySelector('.transcript');
   const askEl = sections.chat.querySelector('.ask');
   const composer = sections.chat.querySelector('form.composer');
@@ -458,13 +459,19 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
     statuses[id] = { state, ticket };
   }
   function statusOf(id) { return statuses[id]; }
-  const costs = {};
-  function cost(ev) {
-    costs[ev.agent] = ev.usd;
-    const total = Object.values(costs).reduce((a, b) => a + b, 0);
-    modeEl.title = Object.entries(costs).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`).join('\n');
-    modeEl.dataset.cost = `$${total.toFixed(2)}`;
+  /**
+   * The team figure -- today's team cost against the daily budget, with no server this
+   * still renders (as `team`, defaulting to 0) but `budget` is undefined so no denominator
+   * is invented. `breakdown` lists every agent id that has spent money, roster or not.
+   */
+  function cost({ team, budget, breakdown }) {
+    const ratio = budget ? team / budget : 0;
+    teamCostEl.textContent = `วันนี้ $${team.toFixed(2)}` + (budget != null ? ` / $${budget}` : '');
+    teamCostEl.classList.toggle('over', budget != null && ratio >= 1);
+    teamCostEl.classList.toggle('warn', budget != null && ratio >= 0.8 && ratio < 1);
+    teamCostEl.title = Object.entries(breakdown).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`).join('\n');
   }
+  cost({ team: 0, budget: undefined, breakdown: {} });
   function mode(text, kind = '') {
     modeEl.textContent = text;
     modeEl.className = 'mode ' + kind;

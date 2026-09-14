@@ -259,6 +259,8 @@ export class Flow {
       teamHash: teamHash(),
       pluginVersion: PLUGIN_VERSION,
       costUsd: this.state.costUsd,
+      dailyBudgetUsd: this.office?.policy?.['daily-budget-usd'] != null
+        ? Number(this.office.policy['daily-budget-usd']) : undefined,
     };
   }
 
