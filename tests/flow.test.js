@@ -93,7 +93,7 @@ test('the manager session is seeded from any prior member cost, and a turn folds
   });
   await flow.onCommand('อยากได้ X');
   assert.equal(seenSeed, 2);          // the restart-safe seed reached the new session
-  assert.equal(state.costs[state.managerSessionId].usd, s.costUsd);   // the turn's result replaces this member's figure
+  assert.equal(state.costs.manager.usd, s.costUsd);   // the turn's result replaces this member's figure
 });
 
 test('the seed is still found once a session.cost event carries `session` (ADR-0002), not just by the literal agent id', async () => {
