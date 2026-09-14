@@ -6,6 +6,7 @@
     <title>UBE Office</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./src/styles.css" />
+    <link rel="stylesheet" href="./src/agents.css" />
   </head>
   <body>
     <div id="viewport"></div>
@@ -13,7 +14,7 @@
     <header id="hud">
       <div class="brand">
         <span class="mark">UBE</span>
-        <span class="sub">Office &middot; interactive preview</span>
+        <span class="sub">Office &middot; agent team</span>
       </div>
       <div class="tools">
         <div class="seg" role="group" aria-label="Camera">
@@ -21,12 +22,13 @@
           <button data-cam="free">Free</button>
         </div>
         <button id="reset">Reset view</button>
+        <button id="panel-toggle">ทีม <span class="badge" hidden></span></button>
       </div>
     </header>
 
     <nav id="roster" aria-label="ทีมงาน"></nav>
 
-    <p id="hint">เลือกคน (คลิกตัว หรือกด 1-5) &middot; คลิกพื้นเพื่อเดิน &middot; คลิกเก้าอี้เพื่อไปนั่ง &middot; ลากขวาเพื่อหมุน</p>
+    <p id="hint">เลือกคน (คลิกตัว หรือกด 1-6) &middot; คลิกพื้นเพื่อเดิน &middot; คลิกเก้าอี้เพื่อไปนั่ง &middot; ปุ่ม "ทีม" เปิดแผงคุยกับผู้จัดการ</p>
 
     <aside id="card" hidden>
       <button id="card-close" aria-label="Close">&times;</button>
@@ -34,6 +36,41 @@
       <h2></h2>
       <p class="note"></p>
       <div class="actions"></div>
+    </aside>
+
+    <aside id="panel" aria-label="แผงทีม">
+      <header>
+        <div class="tabs" role="tablist"></div>
+        <span class="mode"></span>
+        <button class="panel-close" aria-label="Close">&times;</button>
+      </header>
+
+      <section data-tab="chat">
+        <div class="phase-strip"></div>
+        <div class="transcript"></div>
+        <div class="ask" hidden></div>
+        <form class="composer">
+          <input type="text" id="composer-input" placeholder="พิมพ์ไอเดีย หรือตอบผู้จัดการ…" autocomplete="off" />
+          <button type="submit" class="primary">ส่ง</button>
+        </form>
+      </section>
+      <section data-tab="board" hidden></section>
+      <section data-tab="docs" hidden></section>
+      <section data-tab="project" hidden></section>
+      <section data-tab="tv" hidden></section>
+
+      <footer class="mockbar" hidden>
+        <button class="play primary">▶ เล่นตัวอย่าง</button>
+        <button class="stop" disabled>หยุด</button>
+        <label>ความเร็ว
+          <select class="speed" id="mock-speed">
+            <option value="1">1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
+        <label><input type="checkbox" class="auto" id="mock-auto" checked /> ตอบให้เอง</label>
+      </footer>
     </aside>
 
     <div id="toast" hidden></div>

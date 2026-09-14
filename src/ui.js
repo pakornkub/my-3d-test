@@ -1,6 +1,8 @@
 // ui.js -- the HTML overlay: camera toolbar, object card, toast, loading veil.
 // Everything is plain DOM; the 3D layer talks to it through this one object.
 
+import { STATUS_LABEL } from './agents/team.js';
+
 const STATE_TEXT = {
   idle: 'ว่าง',
   turn: 'กำลังหัน',
@@ -60,8 +62,12 @@ export function createUI({ onCamera, onReset, onAction, onSelect }) {
   const roster = document.getElementById('roster');
   let rosterButtons = [];
 
-  /** Rebuilt on every state change, so it doubles as the crew's status readout. */
-  function renderRoster(members, selected) {
+  /**
+   * Rebuilt on every state change, so it doubles as the crew's status readout.
+   * `agentStatus(id)` -> { state, ticket } from the Director; when the agent is doing
+   * something, that wins over the walk/sit state.
+   */
+  function renderRoster(members, selected, agentStatus = () => null) {
     if (rosterButtons.length !== members.length) {
       rosterButtons = members.map((m, i) => {
         const b = document.createElement('button');
@@ -79,8 +85,17 @@ export function createUI({ onCamera, onReset, onAction, onSelect }) {
       b.classList.toggle('ghost', !!m.placeholder);
       b.querySelector('b').textContent = m.label;
       const seat = m.ctl.seat?.name;
-      b.querySelector('em').textContent =
-        (STATE_TEXT[m.ctl.state] ?? m.ctl.state) + (seat && m.ctl.seated ? ' · ' + seat : '');
+      const st = agentStatus(m.id);
+      const em = b.querySelector('em');
+      b.className = b.className.replace(/\bst-\S+/g, '').trim();
+      if (st && st.state !== 'idle') {
+        b.classList.add('st-' + st.state);
+        em.classList.add('st');
+        em.textContent = (STATUS_LABEL[st.state] ?? st.state) + (st.ticket ? ' · ใบ ' + st.ticket : '');
+      } else {
+        em.classList.remove('st');
+        em.textContent = (STATE_TEXT[m.ctl.state] ?? m.ctl.state) + (seat && m.ctl.seated ? ' · ' + seat : '');
+      }
       b.title = m.placeholder ? m.label + ' — ยังไม่มีโมเดลจริง ใช้ตัวแทนไปก่อน' : m.label;
     });
   }

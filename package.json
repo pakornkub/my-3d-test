@@ -3,12 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Interactive isometric UBE office - walk the chibi engineer around and sit him down",
+  "description": "Interactive isometric UBE office - a Claude agent team you can watch work",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "node scripts/publish.mjs"
+    "deploy": "node scripts/publish.mjs",
+    "test": "node --test \"tests/**/*.test.js\""
   },
   "dependencies": {
     "three": "^0.186.0"

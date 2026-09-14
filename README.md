@@ -20,17 +20,18 @@ publishes the site to the `gh-pages` branch ([workflow](.github/workflows/deploy
 
 | | |
 | --- | --- |
-| **Pick someone** | Click them, or press `1`–`5`. A ring marks who has the floor; `Esc` clears it |
+| **Pick someone** | Click them, or press `1`–`6`. A ring marks who has the floor; `Esc` clears it |
 | **Click the floor** | A\* path around the furniture, then walk. With nobody picked, the nearest free person goes |
 | **Click any of 13 chairs** | Walk to the approach spot, turn to the seat angle, sit. A chair someone already claimed is refused |
 | **Click an object** | A card opens with its name and a list of suggested actions |
 | **Drag / scroll** | Orbit and zoom |
 | **Iso / Free** | Orthographic preset that matches the Blender render, or free perspective |
+| **ทีม (top right)** | Opens the team panel: chat with the manager, ticket board, docs, project checklist, TV. **เล่นตัวอย่าง** runs a scripted demo of the whole agent flow |
 
 ![The three generated characters standing together](docs/img/cast.png)
 
 Three models exist so far — a male engineer, a female engineer and the manager, each
-generated separately and put through the same pipeline. The roster lists five; the two
+generated separately and put through the same pipeline. The roster lists six; the three
 without a model yet borrow one and are tinted, and stop being placeholders the moment a real
 model lands in `blender/source/`.
 
@@ -45,9 +46,30 @@ model lands in `blender/source/`.
 </tr>
 </table>
 
-Only the chair actions do something today. Every other action button reports its id and shows
-a toast, so the interaction surface is visible and filling it in is a data edit
-(`src/hotspots.js`) plus one branch in `runAction()`.
+Chair actions sit people down; the team actions (`meet`, `gather`, `report`, `present`,
+`notices`, `browse`) open the agent office described below. The rest still report their id
+and show a toast, so filling one in is a data edit (`src/hotspots.js`) plus one branch in
+`runAction()`.
+
+## The agent team (phase 0: the stage)
+
+The six people are the cast of a Claude agent team that follows the
+[mattpocock-skills](https://www.aihero.dev/skills) main flow: the **manager** grills you at
+the meeting table, writes the spec, breaks it into tracer-bullet tickets on the notice board;
+**implementers** (A, B, C) grab tickets from the frontier and sit at their desks; the
+**reviewer** (D) runs the two-axis code review; **QA** (E) opens the real thing at the TV and
+ticks acceptance criteria; the manager reports back on the TV.
+
+Nothing in the browser talks to Claude. The scene only consumes an **event stream**
+(`src/agents/events.js` is the contract) and a **Director** turns each event into walking,
+sitting and speech bubbles. Today the events come from `src/agents/mock.js`, a scripted
+driver that plays the whole flow including a tool approval, a failed review, a stalled ticket
+and an escalation; press **ทีม** then **เล่นตัวอย่าง**, or type an idea into the chat.
+Untick *ตอบให้เอง* to answer the manager's questions yourself. The same panel and Director
+will sit on a WebSocket to a local Node process running the Claude Agent SDK in phase 1;
+the GitHub Pages build stays on the mock.
+
+`npm test` runs the Director against a fake crew and the event validator (`tests/`).
 
 ## Quick start
 
@@ -139,6 +161,13 @@ src/
   nav.js          occupancy grid, A*, path smoothing, approach repair
   hotspots.js     object name -> label, category, suggested actions
   ui.js           HUD, object card, toast, roster
+  agents/
+    team.js       roles, home desks, meeting seats (data)
+    events.js     the event contract + validate() + frontier()
+    director.js   event -> who walks where, bubbles, panel (no three.js; unit-tested)
+    bubbles.js    speech bubbles via CSS2DRenderer
+    panel.js      team dock: chat, board, docs, project, TV
+    mock.js       scripted driver that emits the same events the server will
 ```
 
 `window.__ube` exposes the scene for poking at from the console:
@@ -155,10 +184,10 @@ src/
 - **Textures are trimmed at export.** The office has none at all, so `rig_character.py` drops
   the normal and roughness maps Meshy ships and halves the base colour: 5.6 MB -> 2.2 MB per
   character, with no change to geometry or colour. What is left is almost all mesh.
-- **Three characters so far** out of a roster of five. The app spawns from the manifest, so
+- **Three characters so far** out of a roster of six. The app spawns from the manifest, so
   the rest appear as soon as they are generated and run through the two Blender scripts.
 - **Bodies do not path around each other.** The A* grid is static; a separation pass pushes
-  overlapping people apart after they move, which is enough at five bodies in one room.
+  overlapping people apart after they move, which is enough at six bodies in one room.
 
 Pipeline details, the seat-height contract and how to add the rest of the cast are in
 [CHARACTERS.md](CHARACTERS.md).
