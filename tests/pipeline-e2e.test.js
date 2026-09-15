@@ -107,7 +107,7 @@ function fixture({ qaSend = null } = {}) {
   };
   const createSession = ({ agent, ticket, options }) => {
     const s = {
-      agent, ticket, cwd: options.cwd, mcp: options.mcpServers ?? null,
+      agent, ticket, cwd: options.cwd, mcp: options.mcpServers ?? null, env: options.env,
       sent: [], lastText: '', costUsd: 0.25, closed: false, limited: false, timedOut: false,
       async start() {},
       async interrupt() {},
@@ -244,6 +244,9 @@ test('one ticket end to end: claim, worktree, implement, gates, review by rule, 
     assert.equal(state.jobs['01'].stage, 'done');
     assert.equal(state.jobs['01'].attempt, 1);
     assert.ok(state.jobs['01'].usd > 0, 'the ticket carries the cost of its three sessions');
+    const implSession = f.sessions.find((s) => s.agent !== REVIEWER && s.agent !== QA);
+    assert.equal(implSession.env.PORT, String(state.jobs['01'].port), 'the implementer sees the same PORT its gates run with');
+    assert.equal(implSession.env.OFFICE_PORT, undefined, 'the server\'s own OFFICE_* never reach a session');
   } finally {
     await f.cleanup();
   }

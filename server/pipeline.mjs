@@ -164,6 +164,17 @@ export function featureCosts(jobs, managerUsd = 0) {
  * chromium` succeeded, else the machine's Chrome or Edge (the CDN download is not always
  * reachable). null when nothing usable is installed.
  */
+/**
+ * The environment an agent session runs in. The server's own PORT / OFFICE_* must not leak:
+ * an implementer whose Playwright config read PORT=5181 from the server tried to bind the
+ * Office Server's port and then asked to kill the process holding it. `port` is the ticket's
+ * own allotment, the same one its gates run with.
+ */
+export function sessionEnv(port, base = process.env) {
+  const { PORT, OFFICE_PORT, OFFICE_PROJECT, OFFICE_PASSIVE, ...rest } = base;
+  return { ...rest, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...(port ? { PORT: String(port) } : {}) };
+}
+
 export function qaBrowser() {
   try {
     const { chromium } = require_('playwright');
@@ -352,9 +363,10 @@ export class Pipeline {
       `spec: .scratch/${this.feature}/spec.md`,
       `worktree นี้อยู่บน branch ${w.branch} (แตกจาก ${w.feature}) commit ที่นี่เท่านั้น ห้าม push`,
     ].join('\n');
+    this.#ticketPort(st);
     const impl = () => {
       if (session) return session;
-      session = this.#session(agent, { cwd: w.path, ticket: id, role: 'impl' });
+      session = this.#session(agent, { cwd: w.path, ticket: id, role: 'impl', port: st.port });
       job.session = session;
       session.start();
       return session;
@@ -417,8 +429,7 @@ export class Pipeline {
     for (;;) {
       st.stage = 'gates'; this.save();
       // each gate run gets its own port (base + 81 + n) so two worktrees' e2e never bind the same one
-      const gatePort = num(this.office?.worktree?.['port-base'], 3100) + 81 + (this.gateSlot++ % 40);
-      gates = await runGates(w.path, this.commands, { port: gatePort, onResult: (g, r) => this.emit(make('gate.result', { agent, ticket: id, gate: g, pass: r.pass, output: tail(r.output, 600) })) });
+      gates = await runGates(w.path, this.commands, { port: st.port, onResult: (g, r) => this.emit(make('gate.result', { agent, ticket: id, gate: g, pass: r.pass, output: tail(r.output, 600) })) });
       const failedGates = gates.filter((g) => !g.pass);
       let feedback = null;
       if (failedGates.length) {
@@ -680,7 +691,13 @@ export class Pipeline {
   }
 
   // ---------------------------------------------------------------- helpers
-  #session(agent, { cwd, ticket, role, mcp }) {
+  /** The port a ticket may bind for its own dev/preview servers and its gates: allotted once per job (base + 81 + n) and kept in the job state so a resumed attempt reuses it. */
+  #ticketPort(st) {
+    if (!st.port) st.port = num(this.office?.worktree?.['port-base'], 3100) + 81 + (this.gateSlot++ % 40);
+    return st.port;
+  }
+
+  #session(agent, { cwd, ticket, role, mcp, port }) {
     this.office = readOffice(this.repo) ?? this.office;   // policy edits apply to the next session, no restart
     const a = this.team[agent];
     const pol = this.policy;
@@ -704,7 +721,7 @@ export class Pipeline {
         maxTurns: num(pol['max-turns'], 60),
         maxBudgetUsd: num(pol['ticket-budget-usd'], 4),
         ...(mcp ? { mcpServers: mcp } : {}),
-        env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+        env: sessionEnv(port),
       },
     });
   }

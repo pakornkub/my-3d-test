@@ -187,6 +187,13 @@ test('a feature report the manager cannot write is not recorded as written', asy
 });
 
 // ---------------------------------------------------------------- gates
+test('sessionEnv drops the server\'s PORT and OFFICE_* and sets the ticket\'s own PORT', async () => {
+  const { sessionEnv } = await import('../server/pipeline.mjs');
+  const env = sessionEnv(3182, { PATH: 'x', PORT: '5181', OFFICE_PORT: '5181', OFFICE_PROJECT: 'p', OFFICE_PASSIVE: '1' });
+  assert.deepEqual(env, { PATH: 'x', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', PORT: '3182' });
+  assert.equal(sessionEnv(undefined, { PORT: '5181' }).PORT, undefined, 'no port allotted: no PORT at all');
+});
+
 test('runGates runs only the commands that exist and reports pass/fail with output', async () => {
   const r = await runGates(process.cwd(), { test: 'node -e "console.log(1)"', typecheck: '', e2e: 'node -e "process.exit(3)"' });
   assert.deepEqual(r.map((g) => [g.gate, g.pass]), [['test', true], ['e2e', false]]);
