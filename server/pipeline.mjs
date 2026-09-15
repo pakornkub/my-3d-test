@@ -22,6 +22,7 @@ import { runGates } from './gates.mjs';
 import { ticketReport, validateReport, featureReportPrompt } from './report.mjs';
 import * as wt from './worktree.mjs';
 import { STATE_DIR } from './state.mjs';
+import { managerRunningTotal } from './costs.mjs';
 
 const IMPLEMENTERS = ['eng_m1', 'eng_f1', 'eng_m2'];
 const REVIEWER = 'eng_f2';
@@ -439,7 +440,7 @@ export class Pipeline {
       costs[k].sessions += j.attempt ?? 1;
       costs[k].usd += j.usd ?? 0;
     }
-    costs.manager = { sessions: 1, usd: this.state.costUsd ?? 0 };
+    costs.manager = { sessions: 1, usd: managerRunningTotal(this.state) };
     const branch = wt.featureBranch(this.feature);
     const diff = wt.diffStat(this.repo, this.project.mainBranch, branch);
     const prompt = featureReportPrompt({

@@ -15,6 +15,7 @@ import { make } from '../src/agents/events.js';
 import { Session } from './runner.mjs';
 import { readBoard, listFeatures, watchBoard } from './board.mjs';
 import { agentDefinitions, teamHash } from './team.mjs';
+import { managerRunningTotal } from './costs.mjs';
 import { readOffice, dailyBudgetUsd } from './office.mjs';
 
 const PLUGIN = 'mattpocock-skills';
@@ -71,6 +72,7 @@ export class Flow {
       emit: this.emit,
       onFile: (p) => this.#onFile(p),
       stallMinutes: Number(policy['stall-minutes'] ?? 6),
+      costSeed: managerRunningTotal(this.state),
       options: {
         cwd: this.repo,
         model: m.model,
@@ -109,8 +111,6 @@ export class Flow {
     this.emit(make('flow.phase', { phase: this.phase, hitl: HITL.has(this.phase), feature: this.state.feature }));
     const res = await s.send(text);
     if (s.sessionId && s.sessionId !== this.state.managerSessionId) { this.state.managerSessionId = s.sessionId; this.save(); }
-    this.state.costUsd = s.costUsd;
-    this.save();
     this.refreshBoard();
     if (res?.ended) return res;
     if (ask && HITL.has(this.phase) && s.lastText) this.askHuman(askKind);
@@ -251,7 +251,7 @@ export class Flow {
     return tickets;
   }
 
-  /** What a fresh scene needs to draw itself. */
+  /** What a fresh scene needs to draw itself. Today's totals go out as their own session.cost events (index.mjs), not duplicated here. */
   snapshot() {
     return {
       phase: this.phase,
@@ -259,7 +259,7 @@ export class Flow {
       tickets: this.state.feature ? readBoard(this.repo, this.state.feature).map(({ file, ...t }) => t) : [],
       teamHash: teamHash(),
       pluginVersion: PLUGIN_VERSION,
-      costUsd: this.state.costUsd,
+      costUsd: managerRunningTotal(this.state),
       // read fresh, not this.office (cached at activation): a reconnect must see an edit to
       // docs/agents/office.md without needing a full onboard recheck to refresh the cache
       dailyBudgetUsd: dailyBudgetUsd(readOffice(this.repo)),

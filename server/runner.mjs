@@ -8,6 +8,7 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { make } from '../src/agents/events.js';
+import { costFields } from './costs.mjs';
 
 const SHORT = (s, n = 90) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s ?? '');
 
@@ -39,11 +40,18 @@ export class Session {
    * @param agent    crew id this session speaks as (manager, eng_m1, ...)
    * @param emit     (event) => void
    * @param onFile   (path) => void after a Write/Edit lands, for docs/board refresh
+   * @param costSeed this session's own running total as of the last time it was logged today
+   *                 (looked up by session id, falling back to the plain agent id only for a
+   *                 legacy entry that predates the `session` field, ADR-0001) -- so resuming
+   *                 it after a restart never makes the figure the scene shows jump backwards.
+   *                 The SDK documents `total_cost_usd` as starting fresh on a resumed session
+   *                 (see SDKResultMessage in the Agent SDK type declarations), so a fresh
+   *                 process must re-add the seed rather than read total_cost_usd alone.
    * @param options  everything for query(): cwd, model, systemPrompt, agents, allowedTools,
    *                 disallowedTools, permissionMode, canUseTool, settingSources, skills,
    *                 mcpServers, maxTurns, maxBudgetUsd, resume, env
    */
-  constructor({ agent, emit, onFile = () => {}, stallMinutes = 6, timeoutMinutes = 0, ticket = null, options = {} }) {
+  constructor({ agent, emit, onFile = () => {}, stallMinutes = 6, timeoutMinutes = 0, ticket = null, costSeed = 0, options = {} }) {
     this.agent = agent;
     this.emit = emit;
     this.onFile = onFile;
@@ -54,7 +62,8 @@ export class Session {
     this.timedOut = false;
     this.options = options;
     this.sessionId = options.resume ?? null;
-    this.costUsd = 0;
+    this.costSeed = costSeed;
+    this.costUsd = costSeed;
     this.turns = 0;
     this.busy = false;
     this.lastText = '';
@@ -163,8 +172,11 @@ export class Session {
         this.turns += msg.num_turns ?? 1;
         if (msg.session_id) this.sessionId = msg.session_id;
         if (typeof msg.total_cost_usd === 'number') {
-          this.costUsd = msg.total_cost_usd;
-          this.emit(make('session.cost', { agent: this.agent, usd: this.costUsd, turns: this.turns, session: this.sessionId }));
+          this.costUsd = this.costSeed + msg.total_cost_usd;
+          // tag the session id so this running total keys itself in state.mjs (ADR-0002)
+          // instead of collapsing onto the plain agent id, which would make a second
+          // session of the same agent overwrite the first rather than add to it
+          this.emit(make('session.cost', { ...costFields(this.agent, this.costUsd, this.sessionId), turns: this.turns }));
         }
         if (msg.subtype !== 'success') {
           this.emit(make('error', { agent: this.agent, message: `${msg.subtype}: ${SHORT(msg.result ?? msg.errors?.join('; ') ?? '', 200)}` }));
