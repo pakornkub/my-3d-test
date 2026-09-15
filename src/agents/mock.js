@@ -15,6 +15,14 @@ const toolAsk = (agent, askId, tool, summary, reason) => ({ toolAsk: make('agent
 const PROJECT = 'my-3d-test';
 const FEATURE = 'agent-office';
 
+// The published GitHub Pages build has no server, so the mock supplies the same shape the
+// server would: a `hello` snapshot with a daily-budget-usd, and session.cost events with a
+// session id as the flow plays. The fake budget is tuned so the team figure crosses into the
+// warning band partway through ticket 03/04 and stays there -- never reaching "over" -- so a
+// visitor actually sees the colour change rather than a demo that ends before it fires.
+const FAKE_BUDGET_USD = 2;
+const cost = (agent, session, usd) => ev('session.cost', { agent, session, usd });
+
 const CHECKLIST = (states) => [
   { n: 1, title: 'บอก repo และ branch หลัก', detail: 'D:\\Claude\\my-3d-test · main' },
   { n: 2, title: 'ตรวจ toolchain', detail: 'npm ci ผ่าน · vite 8 · test: node --test' },
@@ -101,6 +109,13 @@ const REPORT_FEATURE = `# รายงานปิดงาน: agent-office
 /** The full demo, in order. Times are seconds at speed 1. */
 export function demoScript(idea = 'อยากให้ตัวละครในออฟฟิศสะท้อนการทำงานของทีม agent จริง') {
   return [
+    // ---- connection snapshot: the same shape the server's hello() sends, so the panel has a
+    // denominator without a server -- a real connection would replace this the moment one answers
+    ev('hello', {
+      server: 'mock', projects: [], project: null, phase: null, feature: null, team: [],
+      snapshot: { dailyBudgetUsd: FAKE_BUDGET_USD, tickets: [] },
+    }),
+
     // ---- onboarding: the checklist fills in step by step
     ev('project.status', { project: PROJECT, steps: CHECKLIST(['pass', 'running', 'pending', 'pending', 'pending', 'pending', 'pending', 'pending']) }),
     ev('flow.phase', { phase: 'onboard' }),
@@ -120,12 +135,15 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
     ask('q1', 'question', 'เมื่อวิศวกรกำลังใช้เครื่องมือ (เช่นแก้ไฟล์) คุณอยากเห็นชื่อไฟล์บนหัวตัวละครเลย หรือแค่บอกว่า "กำลังแก้โค้ด"?'),
     wait(1.5),
     ev('docs.update', { path: 'CONTEXT.md', kind: 'glossary', content: '# Glossary\n\n- **ticket**: งานหนึ่งใบที่ตัดผ่านทุก layer ทำจบใน session เดียว\n- **frontier**: ticket ที่ blocker เสร็จหมดและยังไม่มีคนหยิบ\n- **bubble**: ป้ายข้อความเหนือหัวตัวละคร แสดงสิ่งที่ agent ทำอยู่\n- **verify**: การเปิดของจริงตรวจตาม acceptance criteria โดย QA' }),
+    cost('manager', 'manager:plan', 0.04),
     wait(2),
     ask('q2', 'question', 'ถ้า reviewer ส่งงานกลับ ให้วิศวกรคนเดิมแก้ต่อ หรือหยิบคนที่ว่างมาแก้แทน?'),
     wait(1.5),
     ev('docs.update', { path: 'docs/adr/0001-css2d-bubbles.md', kind: 'ADR', content: '# ADR-0001: ป้ายเหนือหัวใช้ CSS2DRenderer\n\n## บริบท\nข้อความไทยบน sprite texture เบลอเมื่อ zoom และ wrap ไม่ได้\n\n## การตัดสินใจ\nใช้ CSS2DRenderer (DOM) วางเหนือ canvas หลัก\n\n## ผลที่ตามมา\n+ ฟอนต์ไทยคม stylesheet คุมได้\n− ป้ายไม่ถูกบังโดยวัตถุ 3D ต้องซ่อนเองเมื่อจำเป็น' }),
+    cost('manager', 'manager:plan', 0.09),
     wait(2),
     ask('q3', 'question', 'ข้อสุดท้าย: ticket ที่ค้างเกินสองรอบ ให้หยุดรอคุณ หรือให้ผู้จัดการตัดสินใจข้ามไปก่อน?'),
+    cost('manager', 'manager:plan', 0.15),
     wait(1),
 
     // ---- spec
@@ -134,6 +152,7 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
     ev('agent.tool', { agent: 'manager', tool: 'Read', summary: 'src/crew.js, src/hotspots.js' }),
     wait(3),
     ev('agent.tool', { agent: 'manager', tool: 'Write', summary: '.scratch/agent-office/spec.md' }),
+    cost('manager', 'manager:plan', 0.20),
     wait(2),
     ask('seams', 'seams', 'seam ที่จะเทสต์: (1) Director รับ event → เรียก crew (fake crew) (2) events.validate ตรงตามนี้ไหมครับ?'),
     ev('docs.update', { path: '.scratch/agent-office/spec.md', kind: 'spec', content: '## Problem Statement\nมนุษย์มองไม่เห็นว่า agent แต่ละตัวกำลังทำอะไร ต้องอ่าน log\n\n## Solution\nฉาก 3D รับ event แล้วแสดงเป็นการเดิน นั่ง และ bubble\n\n## User Stories\n1. ในฐานะผู้จัดการ ฉันอยากเห็นว่าใครกำลังทำอะไร\n2. ...\n\n## Implementation Decisions\n- Director แยกจาก three.js ทดสอบด้วย fake crew\n\n## Testing Decisions\n- test ที่ seam: Director + events.validate\n\n## Out of Scope\n- การเชื่อม server จริง' }),
@@ -147,6 +166,7 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
     wait(1),
     ev('board.update', { tickets: withStatus({ '03': { status: 'blocked' }, '05': { status: 'blocked' } }) }),
     ev('agent.say', { agent: 'manager', text: 'ติดบอร์ดแล้ว 5 ใบ ใบ 01, 02, 04 เริ่มได้ทันที' }),
+    cost('manager', 'manager:plan', 0.25),
     wait(2),
 
     // ---- implement: two in parallel
@@ -158,14 +178,20 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
     ev('agent.start', { agent: 'eng_f1', ticket: '02', brief: 'ป้ายลอยเหนือหัวตัวละคร', mode: 'implement' }),
     wait(7),
     ev('agent.tool', { agent: 'eng_m1', tool: 'Read', summary: 'CONTEXT.md, spec.md' }),
+    cost('eng_m1', 'eng_m1:01', 0.05),
     ev('agent.tool', { agent: 'eng_f1', tool: 'Read', summary: 'src/characters.js' }),
+    cost('eng_f1', 'eng_f1:02', 0.06),
     wait(3),
     ev('agent.tool', { agent: 'eng_m1', tool: 'Write', summary: 'tests/events.test.js (แดง)' }),
+    cost('eng_m1', 'eng_m1:01', 0.12),
     wait(3),
     ev('agent.tool', { agent: 'eng_f1', tool: 'Write', summary: 'src/agents/bubbles.js' }),
+    cost('eng_f1', 'eng_f1:02', 0.15),
     ev('agent.tool', { agent: 'eng_m1', tool: 'Edit', summary: 'src/agents/events.js (+84)' }),
+    cost('eng_m1', 'eng_m1:01', 0.22),
     wait(3),
     ev('agent.tool', { agent: 'eng_m1', tool: 'Bash', summary: 'node --test → 9 passed (เขียว)' }),
+    cost('eng_m1', 'eng_m1:01', 0.31),
     wait(2),
     ev('agent.done', { agent: 'eng_m1', ticket: '01', result: 'done', summary: 'validate + frontier พร้อม test 9 ข้อ' }),
     ev('gate.result', { agent: 'eng_m1', ticket: '01', gate: 'test', pass: true, output: '9 passed, 0 failed' }),
@@ -174,14 +200,18 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
     ev('agent.start', { agent: 'eng_f2', ticket: '01', brief: 'รีวิว diff ใบ 01', mode: 'review' }),
     wait(6),
     ev('agent.tool', { agent: 'eng_f2', tool: 'Bash', summary: 'git diff main...ticket/01-events' }),
+    cost('eng_f2', 'eng_f2:01', 0.03),
     wait(3),
+    cost('eng_f2', 'eng_f2:01', 0.05),
     ev('review.result', { agent: 'eng_f2', ticket: '01', assignee: 'eng_m1', standards: ['Mysterious Name: errs → problems'], spec: [], verdict: 'pass' }),
     ev('board.update', { tickets: withStatus({ '01': { status: 'verify', assignee: 'eng_m1' }, '02': { status: 'in-progress', assignee: 'eng_f1' }, '03': { status: 'blocked' }, '05': { status: 'blocked' } }) }),
     wait(2),
     ev('agent.start', { agent: 'eng_m3', ticket: '01', brief: 'ตรวจรับใบ 01 ตาม criteria 3 ข้อ', mode: 'verify' }),
     wait(8),
     ev('agent.tool', { agent: 'eng_m3', tool: 'Bash', summary: 'node --test tests/events.test.js' }),
+    cost('eng_m3', 'eng_m3:01', 0.04),
     wait(3),
+    cost('eng_m3', 'eng_m3:01', 0.07),
     ev('verify.result', { agent: 'eng_m3', ticket: '01', assignee: 'eng_m1', verdict: 'pass', criteria: [
       { text: 'event ที่ขาดฟิลด์ถูกปฏิเสธ', pass: true },
       { text: 'frontier คำนวณจาก blockedBy ถูกต้อง', pass: true },
@@ -194,28 +224,36 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
 
     // ---- ticket 02: review fails once, second round passes
     ev('agent.tool', { agent: 'eng_f1', tool: 'Bash', summary: 'npx vite build → ok' }),
+    cost('eng_f1', 'eng_f1:02', 0.24),
     wait(2),
     ev('agent.done', { agent: 'eng_f1', ticket: '02', result: 'done', summary: 'CSS2DObject ต่อคน ตาม ADR-0001' }),
     ev('gate.result', { agent: 'eng_f1', ticket: '02', gate: 'typecheck', pass: true, output: 'ok' }),
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'review', assignee: 'eng_f1' }, '03': { status: 'blocked' }, '05': { status: 'blocked' } }) }),
     wait(2),
     ev('agent.start', { agent: 'eng_f2', ticket: '02', brief: 'รีวิว diff ใบ 02', mode: 'review' }),
+    cost('eng_f2', 'eng_f2:02', 0.04),
     wait(6),
     ev('review.result', { agent: 'eng_f2', ticket: '02', assignee: 'eng_f1', standards: ['Duplicated Code: resize() ซ้ำกับ scene.js'], spec: ['ป้ายไม่หายเมื่อ ttl หมด (spec ข้อ 4)'], verdict: 'fail' }),
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'in-progress', assignee: 'eng_f1', attempt: 2 }, '03': { status: 'blocked' }, '05': { status: 'blocked' } }) }),
     wait(6),
     ev('agent.tool', { agent: 'eng_f1', tool: 'Edit', summary: 'src/agents/bubbles.js: ttl ใน update()' }),
+    cost('eng_f1', 'eng_f1:02', 0.33),
     wait(3),
+    cost('eng_f1', 'eng_f1:02', 0.42),
     ev('agent.done', { agent: 'eng_f1', ticket: '02', result: 'done', summary: 'แก้ตามรีวิว 2 ข้อ' }),
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'review', assignee: 'eng_f1', attempt: 2 }, '03': { status: 'blocked' }, '05': { status: 'blocked' } }) }),
     wait(2),
     ev('agent.start', { agent: 'eng_f2', ticket: '02', brief: 'รีวิวรอบ 2 ใบ 02', mode: 'review' }),
+    cost('eng_f2', 'eng_f2:02', 0.08),
     wait(5),
+    cost('eng_f2', 'eng_f2:02', 0.13),
     ev('review.result', { agent: 'eng_f2', ticket: '02', assignee: 'eng_f1', standards: [], spec: [], verdict: 'pass' }),
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'verify', assignee: 'eng_f1', attempt: 2 }, '03': { status: 'blocked' }, '05': { status: 'blocked' } }) }),
     wait(1),
     ev('agent.start', { agent: 'eng_m3', ticket: '02', brief: 'ตรวจรับใบ 02', mode: 'verify' }),
+    cost('eng_m3', 'eng_m3:02', 0.05),
     wait(7),
+    cost('eng_m3', 'eng_m3:02', 0.09),
     ev('verify.result', { agent: 'eng_m3', ticket: '02', assignee: 'eng_f1', verdict: 'pass', criteria: [
       { text: 'ข้อความไทยอ่านออกที่ zoom ปกติ', pass: true },
       { text: 'ป้ายตามตัวละครขณะเดิน', pass: true },
@@ -234,22 +272,29 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
     ev('agent.start', { agent: 'eng_m1', ticket: '04', brief: 'บอร์ด ticket ในแผง', mode: 'implement' }),
     wait(7),
     ev('agent.tool', { agent: 'eng_m2', tool: 'Read', summary: 'src/nav.js, src/crew.js' }),
+    cost('eng_m2', 'eng_m2:03', 0.08),
     ev('agent.tool', { agent: 'eng_m1', tool: 'Write', summary: 'src/agents/panel.js' }),
+    cost('eng_m1', 'eng_m1:04', 0.06),
     wait(4),
     toolAsk('eng_m2', 'push1', 'Bash', 'git push origin ticket/03-director', 'push อยู่นอก allowlist ของโปรเจกต์'),
     wait(4),
     ev('agent.tool', { agent: 'eng_m2', tool: 'Bash', summary: 'node --test → 2 failed' }),
+    cost('eng_m2', 'eng_m2:03', 0.16),
     wait(3),
     ev('agent.stalled', { agent: 'eng_m2', ticket: '03', minutes: 6 }),
     wait(4),
     ev('agent.retry', { agent: 'eng_m2', ticket: '03', attempt: 2, note: 'รอบก่อนวนแก้ nav.findPath ไม่จบ ให้เริ่มจาก test ที่ fail' }),
+    cost('eng_m2', 'eng_m2:03', 0.24),
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'done' }, '03': { status: 'in-progress', assignee: 'eng_m2', attempt: 2 }, '04': { status: 'in-progress', assignee: 'eng_m1' }, '05': { status: 'blocked' } }) }),
+    cost('eng_m1', 'eng_m1:04', 0.15),
     wait(6),
     ev('agent.done', { agent: 'eng_m1', ticket: '04', result: 'done', summary: 'kanban 7 คอลัมน์ frontier เรืองแสง' }),
+    cost('eng_m1', 'eng_m1:04', 0.24),
     ev('gate.result', { agent: 'eng_m1', ticket: '04', gate: 'test', pass: true, output: '4 passed' }),
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'done' }, '03': { status: 'in-progress', assignee: 'eng_m2', attempt: 2 }, '04': { status: 'review', assignee: 'eng_m1' }, '05': { status: 'blocked' } }) }),
     wait(2),
     ev('agent.tool', { agent: 'eng_m2', tool: 'Bash', summary: 'node --test → 2 failed (เดิม)' }),
+    cost('eng_m2', 'eng_m2:03', 0.30),
     wait(3),
     ev('agent.stalled', { agent: 'eng_m2', ticket: '03', minutes: 5 }),
     wait(3),
@@ -258,12 +303,16 @@ export function demoScript(idea = 'อยากให้ตัวละครใ
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'done' }, '03': { status: 'needs-human', assignee: 'eng_m2', attempt: 2 }, '04': { status: 'review', assignee: 'eng_m1' }, '05': { status: 'blocked' } }) }),
     wait(3),
     ev('agent.start', { agent: 'eng_f2', ticket: '04', brief: 'รีวิว diff ใบ 04', mode: 'review' }),
+    cost('eng_f2', 'eng_f2:04', 0.03),
     wait(5),
+    cost('eng_f2', 'eng_f2:04', 0.06),
     ev('review.result', { agent: 'eng_f2', ticket: '04', assignee: 'eng_m1', standards: [], spec: [], verdict: 'pass' }),
     ev('board.update', { tickets: withStatus({ '01': { status: 'done' }, '02': { status: 'done' }, '03': { status: 'needs-human', assignee: 'eng_m2', attempt: 2 }, '04': { status: 'verify', assignee: 'eng_m1' }, '05': { status: 'blocked' } }) }),
     wait(1),
     ev('agent.start', { agent: 'eng_m3', ticket: '04', brief: 'ตรวจรับใบ 04', mode: 'verify' }),
+    cost('eng_m3', 'eng_m3:04', 0.03),
     wait(7),
+    cost('eng_m3', 'eng_m3:04', 0.06),
     ev('verify.result', { agent: 'eng_m3', ticket: '04', assignee: 'eng_m1', verdict: 'pass', criteria: [
       { text: 'frontier เรืองแสง', pass: true },
       { text: 'ใบเลื่อนคอลัมน์เมื่อ board.update', pass: true },

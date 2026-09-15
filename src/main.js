@@ -86,7 +86,8 @@ async function init() {
 
   ui.progress('กำลังวางทีมงาน…');
   crew = new Crew({ pack, nav, scene: viewer.scene });
-  crew.onChange = () => ui.renderRoster(crew.members, crew.selected, (id) => director?.status[id]);
+  crew.onChange = () => ui.renderRoster(crew.members, crew.selected,
+    (id) => director?.status[id], (id) => director?.memberCost(id));
   for (const spec of CREW) {
     const m = crew.add(spec);
     if (!m) continue;
@@ -134,6 +135,7 @@ async function init() {
       currentProject = e.project;
       panel.setProjects(e.projects);
       if (e.snapshot?.tickets?.length) director.handle(make('board.update', { tickets: e.snapshot.tickets }));
+      director.setBudget(e.snapshot?.dailyBudgetUsd);
       return;
     }
     if (e.type === 'project.status') currentProject = e.project;

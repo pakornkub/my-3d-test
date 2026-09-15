@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { Flow } from '../server/flow.mjs';
 import { daySeed } from '../server/costs.mjs';
+import { writeOffice, DEFAULTS } from '../server/office.mjs';
+
+const setDailyBudget = (repo, usd) =>
+  writeOffice(repo, { ...DEFAULTS, policy: { ...DEFAULTS.policy, 'daily-budget-usd': String(usd) } });
 
 // an empty repo per test: a real .scratch/ would start an fs.watch and keep the runner alive
 const emptyRepo = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ube-flow-'));
@@ -123,4 +127,23 @@ test('a message during onboarding is refused without touching the session', asyn
   await flow.onCommand('hi');
   assert.equal(s.sent.length, 0);
   assert.match(events.at(-1).text, /onboarding/);
+});
+
+test('snapshot carries daily-budget-usd from the office file on disk', () => {
+  const { flow } = setup();
+  setDailyBudget(flow.repo, 5);
+  assert.equal(flow.snapshot().dailyBudgetUsd, 5);
+});
+
+test('snapshot has no budget when the repo has no office file', () => {
+  const { flow } = setup();
+  assert.equal(flow.snapshot().dailyBudgetUsd, undefined);
+});
+
+test('editing daily-budget-usd on disk changes the next snapshot without reconstructing Flow', () => {
+  const { flow } = setup();
+  setDailyBudget(flow.repo, 5);
+  assert.equal(flow.snapshot().dailyBudgetUsd, 5);
+  setDailyBudget(flow.repo, 8);
+  assert.equal(flow.snapshot().dailyBudgetUsd, 8);
 });

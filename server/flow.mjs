@@ -16,6 +16,7 @@ import { Session } from './runner.mjs';
 import { readBoard, listFeatures, watchBoard } from './board.mjs';
 import { agentDefinitions, teamHash } from './team.mjs';
 import { managerRunningTotal } from './costs.mjs';
+import { readOffice, dailyBudgetUsd } from './office.mjs';
 
 const PLUGIN = 'mattpocock-skills';
 const PLUGIN_VERSION = '1.2.3';
@@ -84,7 +85,7 @@ export class Flow {
         permissionMode: 'default',
         canUseTool: this.approvals?.canUseToolFor({ agent: 'manager', repo: this.repo, policy, role: 'manager' }),
         maxTurns: Number(policy['max-turns'] ?? 60),
-        maxBudgetUsd: Number(policy['daily-budget-usd'] ?? 10),
+        maxBudgetUsd: dailyBudgetUsd(this.office) ?? 10,
         ...(this.state.managerSessionId ? { resume: this.state.managerSessionId } : {}),
         env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
       },
@@ -258,6 +259,10 @@ export class Flow {
       tickets: this.state.feature ? readBoard(this.repo, this.state.feature).map(({ file, ...t }) => t) : [],
       teamHash: teamHash(),
       pluginVersion: PLUGIN_VERSION,
+      costUsd: managerRunningTotal(this.state),
+      // read fresh, not this.office (cached at activation): a reconnect must see an edit to
+      // docs/agents/office.md without needing a full onboard recheck to refresh the cache
+      dailyBudgetUsd: dailyBudgetUsd(readOffice(this.repo)),
     };
   }
 

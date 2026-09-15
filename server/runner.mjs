@@ -170,6 +170,7 @@ export class Session {
       }
       case 'result': {
         this.turns += msg.num_turns ?? 1;
+        if (msg.session_id) this.sessionId = msg.session_id;
         if (typeof msg.total_cost_usd === 'number') {
           this.costUsd = this.costSeed + msg.total_cost_usd;
           // tag the session id so this running total keys itself in state.mjs (ADR-0002)
@@ -177,7 +178,6 @@ export class Session {
           // session of the same agent overwrite the first rather than add to it
           this.emit(make('session.cost', { ...costFields(this.agent, this.costUsd, this.sessionId), turns: this.turns }));
         }
-        if (msg.session_id) this.sessionId = msg.session_id;
         if (msg.subtype !== 'success') {
           this.emit(make('error', { agent: this.agent, message: `${msg.subtype}: ${SHORT(msg.result ?? msg.errors?.join('; ') ?? '', 200)}` }));
         }

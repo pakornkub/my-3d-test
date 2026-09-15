@@ -65,15 +65,16 @@ export function createUI({ onCamera, onReset, onAction, onSelect }) {
   /**
    * Rebuilt on every state change, so it doubles as the crew's status readout.
    * `agentStatus(id)` -> { state, ticket } from the Director; when the agent is doing
-   * something, that wins over the walk/sit state.
+   * something, that wins over the walk/sit state. `memberCost(id)` -> number | undefined,
+   * the Director's member cost; undefined renders no figure at all, not "$0.00".
    */
-  function renderRoster(members, selected, agentStatus = () => null) {
+  function renderRoster(members, selected, agentStatus = () => null, memberCost = () => undefined) {
     if (rosterButtons.length !== members.length) {
       rosterButtons = members.map((m, i) => {
         const b = document.createElement('button');
         b.className = 'person';
         b.innerHTML = `<span class="key">${i + 1}</span>`
-          + `<span class="who"><b></b><em></em></span>`;
+          + `<span class="who"><span class="row1"><b></b><span class="cost"></span></span><em></em></span>`;
         b.addEventListener('click', () => onSelect(i));
         return b;
       });
@@ -84,6 +85,8 @@ export function createUI({ onCamera, onReset, onAction, onSelect }) {
       b.classList.toggle('on', m === selected);
       b.classList.toggle('ghost', !!m.placeholder);
       b.querySelector('b').textContent = m.label;
+      const usd = memberCost(m.id);
+      b.querySelector('.cost').textContent = usd === undefined ? '' : '$' + usd.toFixed(2);
       const seat = m.ctl.seat?.name;
       const st = agentStatus(m.id);
       const em = b.querySelector('em');

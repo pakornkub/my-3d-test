@@ -20,6 +20,7 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
   const tabs = root.querySelector('.tabs');
   const sections = Object.fromEntries([...root.querySelectorAll('section[data-tab]')].map((s) => [s.dataset.tab, s]));
   const modeEl = root.querySelector('.mode');
+  const teamCostEl = root.querySelector('.teamcost');
   const transcriptEl = sections.chat.querySelector('.transcript');
   const askEl = sections.chat.querySelector('.ask');
   const composer = sections.chat.querySelector('form.composer');
@@ -458,13 +459,27 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
     statuses[id] = { state, ticket };
   }
   function statusOf(id) { return statuses[id]; }
-  const costs = {};
-  function cost(ev) {
-    costs[ev.agent] = ev.usd;
-    const total = Object.values(costs).reduce((a, b) => a + b, 0);
-    modeEl.title = Object.entries(costs).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`).join('\n');
-    modeEl.dataset.cost = `$${total.toFixed(2)}`;
+  const WARN_RATIO = 0.8;
+  /**
+   * The team figure -- today's team cost against the daily budget, with no server this
+   * still renders (as `team`, defaulting to 0) but `budget` is undefined so no denominator
+   * is invented. `breakdown` lists every agent id that has spent money, roster or not.
+   *
+   * "Known" is `budget != null`, checked once and reused for the denominator and both
+   * styles -- comparing `team`/`budget` directly (not a `team / budget` ratio) so a
+   * `daily-budget-usd: 0` still reads as over rather than silently dividing to a falsy 0.
+   */
+  function cost({ team, budget, breakdown }) {
+    const known = budget != null;
+    const over = known && team >= budget;
+    const warn = known && !over && team >= budget * WARN_RATIO;
+    teamCostEl.textContent = `วันนี้ $${team.toFixed(2)}` + (known ? ` / $${budget.toFixed(2)}` : '');
+    teamCostEl.classList.toggle('over', over);
+    teamCostEl.classList.toggle('warn', warn);
+    const rows = Object.entries(breakdown).map(([k, v]) => `${labels[k] ?? k}: $${v.toFixed(2)}`);
+    teamCostEl.title = [...rows, 'วันนี้ = วัน UTC (รีเซ็ต 07:00 น. เวลาไทย)'].join('\n');
   }
+  cost({ team: 0, budget: undefined, breakdown: {} });
   function mode(text, kind = '') {
     modeEl.textContent = text;
     modeEl.className = 'mode ' + kind;

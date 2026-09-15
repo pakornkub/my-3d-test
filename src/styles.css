@@ -108,7 +108,9 @@ button:active { transform: translateY(1px); }
   border-radius: 6px;
 }
 .person .who { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
-.person .who b { font-size: 12.5px; font-weight: 600; }
+.person .who .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
+.person .who b { font-size: 12.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person .who .cost { flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--navy-soft); }
 .person .who em {
   font-style: normal;
   font-size: 10.5px;
@@ -119,7 +121,7 @@ button:active { transform: translateY(1px); }
 }
 .person.on { background: var(--azure); border-color: transparent; }
 .person.on .key { color: #fff; background: rgba(255, 255, 255, 0.24); }
-.person.on .who b, .person.on .who em { color: #fff; }
+.person.on .who b, .person.on .who em, .person.on .who .cost { color: #fff; }
 .person.on .who em { opacity: 0.85; }
 .person.ghost .who b::after {
   content: '·';

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseAgentFile, loadTeam, agentDefinitions } from '../server/team.mjs';
 import { parseTicket, readBoard, claimTicket, setTicketField } from '../server/board.mjs';
-import { parseOffice, renderOffice, commandAllowed, allowlistRules, DEFAULTS } from '../server/office.mjs';
+import { parseOffice, renderOffice, commandAllowed, allowlistRules, dailyBudgetUsd, DEFAULTS } from '../server/office.mjs';
 import { summarizeTool } from '../server/runner.mjs';
 import { daySeed, runningTotalFor, managerRunningTotal, recordCost } from '../server/costs.mjs';
 
@@ -178,6 +178,11 @@ test('recordCost folds into the same bucket for events on the day it already hol
     s1: { agent: 'eng_m1', usd: 0.4, session: 's1' },
   });
   assert.equal(st.runningTotalsDay, '2026-09-15');
+});
+
+test('dailyBudgetUsd reads the one number the session cap and the panel denominator share', () => {
+  assert.equal(dailyBudgetUsd({ policy: { 'daily-budget-usd': '7.5' } }), 7.5);
+  assert.equal(dailyBudgetUsd(null), undefined);
 });
 
 // ---------------------------------------------------------------- runner
