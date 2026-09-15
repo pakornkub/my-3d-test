@@ -8,10 +8,10 @@
       "port": 5180
     },
     {
-      "name": "feature-cost-readout",
+      "name": "office-server",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", ".worktrees/cost-readout", "run", "dev", "--", "--port", "5190", "--strictPort"],
-      "port": 5190
+      "runtimeArgs": ["run", "office"],
+      "port": 5181
     }
   ]
 }

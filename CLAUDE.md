@@ -71,7 +71,7 @@ The five canonical roles, unchanged, written as the `Status:` line of a ticket f
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (neither exists yet; `/domain-modeling` creates them lazily). See `docs/agents/domain.md`.
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (ADR-0001 event schema evolves by optional fields, ADR-0002 cost is per session; `/domain-modeling` adds to them). The reviewer files a finding that contradicts either under SPEC, so keep them current. See `docs/agents/domain.md`.
 
 ## Things that bite
 
