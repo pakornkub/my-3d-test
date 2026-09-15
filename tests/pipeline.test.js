@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseImplementResult, parseReviewResult, parseVerifyResult, pickImplementer } from '../server/pipeline.mjs';
-import { ticketReport, validateReport } from '../server/report.mjs';
+import { parseImplementResult, parseReviewResult, parseVerifyResult, pickImplementer, chargeJob, wasteAttempt, featureCosts, Pipeline } from '../server/pipeline.mjs';
+import { ticketReport, validateReport, featureReportPrompt } from '../server/report.mjs';
 import { runGates, runCommand } from '../server/gates.mjs';
 import * as wt from '../server/worktree.mjs';
 
@@ -84,6 +84,106 @@ test('ticketReport follows the level-1 template and validateReport accepts it', 
   assert.match(md, /server รันเอง/);
   assert.ok(validateReport('# x\n## Diff\n## ทำอะไร', 1).length >= 3);
   assert.ok(validateReport('# r\n## 1. ขอมาว่าอะไร\n## 3. Tickets', 2).some((e) => e.includes('2. ได้อะไร')));
+});
+
+test('ticketReport totals every attempt and says what went to rounds that did not close the ticket', () => {
+  const t = { id: '03', title: 'T', agent: 'eng_f1', branch: 'ticket/f-03', attempt: 1, ms: 60_000,
+    what: ['did x'], gates: [], review: null, verify: null, criteria: [], open: [], diffStat: '' };
+  assert.match(ticketReport({ ...t, usd: 4.2, usdWasted: 2.37 }), /ค่าใช้จ่าย: \$4\.20 \(รวมรอบที่ไม่ได้ปิดใบ \$2\.37\)/);
+  assert.match(ticketReport({ ...t, usd: 4.2, usdWasted: 0 }), /ค่าใช้จ่าย: \$4\.20$/m);
+  assert.match(ticketReport({ ...t, usd: 4.2 }), /ค่าใช้จ่าย: \$4\.20$/m);
+});
+
+test('featureReportPrompt shows the wasted column and a total row', () => {
+  const md = featureReportPrompt({ feature: 'f', project: 'p', branch: 'feature/f', diffStat: '', spec: 's',
+    tickets: [{ id: '01', title: 'T', assignee: 'eng_m1', status: 'done' }],
+    costs: { eng_m1: { sessions: 3, usd: 14.1, usdWasted: 6 }, manager: { sessions: 1, usd: 2.5, usdWasted: 0 } } });
+  assert.match(md, /\| eng_m1 \| 3 \| \$14\.10 \| \$6\.00 \|/);
+  assert.match(md, /\| รวม \| - \| \$16\.60 \| \$6\.00 \|/);
+});
+
+// ---------------------------------------------------------------- what a ticket cost
+test('chargeJob folds every session into the ticket total as it is spent', () => {
+  const job = {};
+  chargeJob(job, 1.25);                       // the implementer's first turn
+  chargeJob(job, 0.5);                        // the reviewer of that round
+  assert.equal(job.usd, 1.75);
+  assert.equal(job.usdAttempt, 1.75);
+  for (const bad of [undefined, null, 0, -1, NaN, 'x']) chargeJob(job, bad);
+  assert.equal(job.usd, 1.75, 'a missing or nonsense figure changes nothing');
+});
+
+test('wasteAttempt counts an attempt that did not close the ticket, and only once', () => {
+  const job = {};
+  chargeJob(job, 2);                          // attempt 1: timed out
+  wasteAttempt(job);
+  wasteAttempt(job);                          // #retryOrEscalate then #escalate: idempotent
+  assert.deepEqual([job.usd, job.usdWasted, job.usdAttempt], [2, 2, 0]);
+  chargeJob(job, 3);                          // attempt 2 closes the ticket
+  assert.deepEqual([job.usd, job.usdWasted, job.usdAttempt], [5, 2, 3]);
+});
+
+test('featureCosts counts every attempt of every ticket, not only the ones that closed', () => {
+  // the shape of the first overnight run: two tickets whose escalated attempts were never counted
+  const jobs = {
+    '01': { agent: 'eng_m1', attempt: 1, stage: 'done', usd: 9.5, usdWasted: 6 },
+    '02': { agent: 'eng_m1', attempt: 2, stage: 'done', usd: 4.6 },
+    '03': { agent: 'eng_f1', attempt: 1, stage: 'escalated', usd: 3, usdWasted: 3 },
+  };
+  const costs = featureCosts(jobs, 2.5);
+  assert.deepEqual(costs.eng_m1, { sessions: 3, usd: 14.1, usdWasted: 6 });
+  assert.deepEqual(costs.eng_f1, { sessions: 1, usd: 3, usdWasted: 3 });
+  assert.deepEqual(costs.manager, { sessions: 1, usd: 2.5, usdWasted: 0 });
+  assert.deepEqual(featureCosts({}, 0).manager, { sessions: 1, usd: 0, usdWasted: 0 });
+  assert.equal(featureCosts({ '01': { usd: 1 } }, 0).unknown.usd, 1);
+});
+
+// ---------------------------------------------------------------- the feature report
+/** A Pipeline with the disk and the manager replaced: enough to drive maybeFeatureReport(). */
+function reportRig(manager, jobs = { '01': { agent: 'eng_m1', attempt: 2, stage: 'done', usd: 5, usdWasted: 3 } }) {
+  const state = { feature: 'f', jobs, runningTotals: {} };
+  const events = [], saves = [];
+  const p = new Pipeline({
+    project: { id: 'proj', path: os.tmpdir(), mainBranch: 'main' },   // not a repo: every git call is a no-op
+    state, team: {}, office: { policy: {}, commands: {} },
+    emit: (e) => events.push(e),
+    approvals: { canUseToolFor: () => () => ({}) },
+    save: () => saves.push(state.featureReported),
+    manager,
+  });
+  p.active = true;
+  p.board = () => [{ id: '01', title: 'T', status: 'done', rawStatus: 'done', assignee: 'eng_m1', criteria: [] }];
+  return { p, state, events, saves };
+}
+
+const L2 = ['# รายงานปิดงาน: f', '## 1. ขอมาว่าอะไร', '## 2. ได้อะไร', '## 3. Tickets',
+  '## 4. ตัดสินใจระหว่างทาง', '## 5. ของที่เหลือ', '## 6. Diff รวมและการรวมโค้ด', '## 7. ค่าใช้จ่าย'].join('\n');
+
+test('the feature report is handed every attempt of a ticket, and records itself as written', async () => {
+  let prompt = '';
+  const { p, state, events } = reportRig(async (text) => { prompt = prompt || text; return L2; });
+  await p.maybeFeatureReport();
+  assert.match(prompt, /\| eng_m1 \| 2 \| \$5\.00 \| \$3\.00 \|/, 'the closing session was not the only one that cost money');
+  assert.match(prompt, /\| รวม \| - \| \$5\.00 \| \$3\.00 \|/);
+  assert.equal(state.featureReported, true);
+  assert.ok(events.some((e) => e.type === 'feature.report' && e.valid));
+});
+
+test('a feature report the manager cannot write is not recorded as written', async () => {
+  // the flag used to be set after the manager's turn: a throw there left the pipeline believing
+  // it had reported (this.reported) while the state file said nothing had been written
+  const { p, state, events, saves } = reportRig(async () => { throw new Error('manager session died'); });
+  await p.maybeFeatureReport();
+  assert.equal(state.featureReported, false);
+  assert.equal(p.reported, false, 'a later tick must be free to try again');
+  assert.ok(saves.length, 'the rollback is saved, not only held in memory');
+  assert.ok(events.some((e) => e.type === 'error' && /manager session died/.test(e.message)));
+  assert.ok(!events.some((e) => e.type === 'feature.report'));
+  // and the next try is free to write it
+  p.managerTurn = async () => L2;
+  await p.maybeFeatureReport();
+  assert.equal(state.featureReported, true);
+  assert.ok(events.some((e) => e.type === 'feature.report'));
 });
 
 // ---------------------------------------------------------------- gates

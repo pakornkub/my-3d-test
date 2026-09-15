@@ -16,7 +16,7 @@ const EMPTY = () => ({
   feature: null,
   phase: 'onboard',
   onboarding: [],          // [{ n, state, detail }]
-  jobs: {},                // ticket id -> { agent, sessionId, attempt, status, worktree }
+  jobs: {},                // ticket id -> { agent, sessionId, attempt, status, worktree, usd/usdWasted (pipeline.mjs) }
   runningTotals: {},       // session key (`ev.session ?? ev.agent`) -> { agent, usd }, see costs.mjs
   runningTotalsDay: null,  // the UTC day `runningTotals` is a bucket for, see costs.mjs:recordCost
   updatedAt: null,
