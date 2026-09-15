@@ -209,7 +209,8 @@ export class Pipeline {
     this.running = new Map();            // ticket id -> { agent, promise }
     this.locks = { [REVIEWER]: new Mutex(), [QA]: new Mutex() };
     this.active = false;
-    this.slot = 0;
+    this.slot = 0;        // verify: dev server base+1+n, the worktree's Office Server base+41+n
+    this.gateSlot = 0;    // gates: base+81+n, its own counter so verify's ports stay predictable
     this.reported = false;
   }
 
@@ -415,7 +416,9 @@ export class Pipeline {
     let gates = [], review = null, verify = null, rounds = 0;
     for (;;) {
       st.stage = 'gates'; this.save();
-      gates = await runGates(w.path, this.commands, { onResult: (g, r) => this.emit(make('gate.result', { agent, ticket: id, gate: g, pass: r.pass, output: tail(r.output, 600) })) });
+      // each gate run gets its own port (base + 81 + n) so two worktrees' e2e never bind the same one
+      const gatePort = num(this.office?.worktree?.['port-base'], 3100) + 81 + (this.gateSlot++ % 40);
+      gates = await runGates(w.path, this.commands, { port: gatePort, onResult: (g, r) => this.emit(make('gate.result', { agent, ticket: id, gate: g, pass: r.pass, output: tail(r.output, 600) })) });
       const failedGates = gates.filter((g) => !g.pass);
       let feedback = null;
       if (failedGates.length) {

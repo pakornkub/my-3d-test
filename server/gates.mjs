@@ -28,14 +28,19 @@ export function runCommand(command, cwd, { timeoutMs = 300_000, env = {} } = {})
  * @param commands  office.commands
  * @param which     gate names to run, in order; missing commands are skipped, not failed
  * @param onResult  (gate, result) called as each finishes
+ * @param port      a port this worktree may bind (two tickets run gates at once): `{port}` in a
+ *                  command is replaced and the child gets it as PORT, so an e2e config can read
+ *                  process.env.PORT instead of hard-coding one
  * @returns [{ gate, pass, output, ms }]
  */
-export async function runGates(cwd, commands, { which = ['typecheck', 'test', 'e2e'], onResult = () => {}, env = {} } = {}) {
+export async function runGates(cwd, commands, { which = ['typecheck', 'test', 'e2e'], onResult = () => {}, env = {}, port } = {}) {
   const results = [];
+  const portEnv = port ? { PORT: String(port) } : {};
   for (const gate of which) {
-    const cmd = commands?.[gate];
-    if (!cmd) continue;
-    const r = await runCommand(cmd, cwd, { env });
+    const raw = commands?.[gate];
+    if (!raw) continue;
+    const cmd = port ? raw.replace(/\{port\}/g, String(port)) : raw;
+    const r = await runCommand(cmd, cwd, { env: { ...portEnv, ...env } });
     const row = { gate, pass: r.pass, output: r.output, ms: r.ms, command: cmd };
     results.push(row);
     onResult(gate, row);

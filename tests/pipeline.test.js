@@ -191,6 +191,9 @@ test('runGates runs only the commands that exist and reports pass/fail with outp
   const r = await runGates(process.cwd(), { test: 'node -e "console.log(1)"', typecheck: '', e2e: 'node -e "process.exit(3)"' });
   assert.deepEqual(r.map((g) => [g.gate, g.pass]), [['test', true], ['e2e', false]]);
   assert.equal(r[0].output, '1');
+  const p = await runGates(process.cwd(), { test: 'node -e "console.log(process.env.PORT, {port})"' }, { port: 3181 });
+  assert.equal(p[0].output, '3181 3181', '{port} is substituted and PORT is in the environment');
+  assert.match(p[0].command, /3181/);
   const t = await runCommand('node -e "setTimeout(()=>{},5000)"', process.cwd(), { timeoutMs: 300 });
   assert.equal(t.pass, false);
   assert.match(t.output, /timeout/);
