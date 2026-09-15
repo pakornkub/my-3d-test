@@ -148,7 +148,7 @@ class Mutex {
 
 // ---------------------------------------------------------------- the pipeline
 export class Pipeline {
-  constructor({ project, state, team, office, emit, approvals, save, manager, createSession = (o) => new Session(o) }) {
+  constructor({ project, state, team, office, emit, approvals, save, manager, createSession = (o) => new Session(o), tickMs = 15_000 }) {
     this.project = project;
     this.state = state;
     this.team = team;
@@ -158,6 +158,7 @@ export class Pipeline {
     this.save = save;
     this.managerTurn = manager;          // async (text) => lastText ; the manager's session, for the feature report
     this.createSession = createSession;
+    this.tickMs = tickMs;                // how often idle implementers are offered the frontier (a test drives tick() by hand)
     this.running = new Map();            // ticket id -> { agent, promise }
     this.locks = { [REVIEWER]: new Mutex(), [QA]: new Mutex() };
     this.active = false;
@@ -176,7 +177,7 @@ export class Pipeline {
     this.reported = !!this.state.featureReported;   // a restart must not write the report twice
     this.#resume();
     this.tick();
-    this.timer = setInterval(() => this.tick(), 15_000);
+    this.timer = setInterval(() => this.tick(), this.tickMs);
   }
 
   /** Stop handing out tickets for a while (usage limit). Running jobs park themselves via pauseFor. */
