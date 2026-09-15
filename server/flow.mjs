@@ -118,13 +118,23 @@ export class Flow {
     return res;
   }
 
-  /** Surface the manager's last message as something the human must answer. */
+  /**
+   * Surface the manager's last message as something the human must answer.
+   *
+   * When the reply is written in the frontier-question convention it becomes a kind
+   * "choice" ask -- the same widget the model's own AskUserQuestion gets -- carrying the
+   * parsed questions and the intro above them. `text` is always the whole reply,
+   * unchanged, so a client that ignores the extra fields still shows what was said
+   * (ADR-0001: the schema grows by optional fields). Anything else asks as it always has.
+   */
   askHuman(kind = 'question') {
     const text = this.manager?.lastText;
     if (!text) return null;
     const askId = `flow_${Date.now()}_${++this.askN}`;
     this.pendingAsk = askId;
-    this.emit(make('flow.ask', { askId, kind, text }));
+    const parsed = parseFrontierQuestions(text);
+    if (parsed) this.emit(make('flow.ask', { askId, kind: 'choice', text, intro: parsed.intro, questions: choiceQuestions(parsed) }));
+    else this.emit(make('flow.ask', { askId, kind, text }));
     return askId;
   }
 
@@ -304,4 +314,128 @@ export function readSkillBody(name) {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------- frontier questions
+//
+// The manager writes the questions it wants answered in one stable markdown convention:
+//
+//   ❓ **Q2** — **title**: body…
+//   (ก) **label** — detail
+//   ➡️ **(ก)** — why…
+//
+// Parsing that turns a wall of text into the panel's multiple-choice widget instead of a
+// paragraph the human has to answer by typing. Be tolerant of everything that is only
+// decoration: the bold markers, the separator (— – - :), the recommendation line, and the
+// alphabet of the keys (ก ข ค ง, a b c, 1 2 3). An option's detail may wrap onto the
+// following lines. Nothing here is required -- when the text is just prose the parse
+// returns null and the ask stays the plain paragraph it is today.
+
+const Q_LINE = /^(?:❓|❔)\s*(.*)$/u;
+const REC_LINE = /^(?:➡️|➡|→|=>|->)\s*(.*)$/u;
+const OPT_LINE = /^[(（]\s*([^)）]{1,8}?)\s*[)）]\s*(.+)$/u;
+const RULE_LINE = /^(?:-{3,}|={3,}|_{3,}|\*{3,})$/;
+const ID_RE = /^\*{0,2}\s*(Q\s*\d+\s*['’ʼ′`]?)\s*\*{0,2}/iu;
+
+const clean = (s) => s.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+const stripSep = (s) => s.replace(/^[\s—–:•-]+/u, '').trim();
+const join = (a, b) => (a ? a + ' ' + b : b);
+
+/** "**label** — detail" | "label: detail" | "label"  ->  [label, detail] */
+function splitLabel(rest) {
+  const s = rest.trim();
+  const bold = s.match(/^\*\*\s*(.+?)\s*\*\*\s*(.*)$/su);
+  if (bold) return [clean(bold[1]), stripSep(clean(bold[2]))];
+  const sep = s.match(/^(.+?)\s*(?:—|–|--|-|:)\s+(.*)$/su);
+  if (sep) return [clean(sep[1]), clean(sep[2])];
+  return [clean(s), ''];
+}
+
+/**
+ * @param text  the manager's whole reply
+ * @returns {{intro: string, questions: Array}|null}  null when no ❓ question with at
+ *          least two options is in there -- the caller then asks the way it always has.
+ */
+export function parseFrontierQuestions(text) {
+  if (typeof text !== 'string' || !/[❓❔]/u.test(text)) return null;
+  const intro = [];
+  const questions = [];
+  let q = null;
+  let tail = 'question';   // where a wrapped line belongs: question | option | why | null
+  const push = () => { if (q) questions.push(q); };
+
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (RULE_LINE.test(line)) { tail = null; continue; }
+    const qm = line.match(Q_LINE);
+    if (qm) {
+      push();
+      const rest = qm[1].trim();
+      const idm = rest.match(ID_RE);
+      const id = idm ? idm[1].replace(/\s+/g, '') : `Q${questions.length + 1}`;
+      const [header, body] = splitLabel(stripSep(idm ? rest.slice(idm[0].length) : rest));
+      q = { id, header, question: body, options: [], recommended: null, why: '', recKey: null };
+      tail = 'question';
+      continue;
+    }
+    if (!q) { intro.push(raw); continue; }
+    const rm = line.match(REC_LINE);
+    if (rm) {
+      const body = rm[1];
+      const km = body.match(/[(（]\s*\*{0,2}\s*([^)）*]{1,8}?)\s*\*{0,2}\s*[)）]/u);
+      if (km) {
+        q.recKey = clean(km[1]);
+        q.why = stripSep(clean(body.slice(km.index + km[0].length)));
+      } else {
+        const [label, why] = splitLabel(body);
+        const first = label.split(/\s+/)[0] ?? '';
+        q.recKey = first.length <= 8 ? first : null;
+        q.why = why || (q.recKey ? '' : label);
+      }
+      tail = 'why';
+      continue;
+    }
+    const om = line.match(OPT_LINE);
+    if (om) {
+      const [label, description] = splitLabel(om[2]);
+      q.options.push({ key: clean(om[1]), label, description, recommended: false });
+      tail = 'option';
+      continue;
+    }
+    if (!line) { tail = null; continue; }
+    if (tail === 'option' && q.options.length) {
+      const o = q.options.at(-1);
+      o.description = join(o.description, clean(line));
+    } else if (tail === 'why') q.why = join(q.why, clean(line));
+    else if (tail === 'question' || !q.options.length) q.question = join(q.question, clean(line));
+  }
+  push();
+
+  for (const item of questions) {
+    const key = item.recKey;
+    delete item.recKey;
+    if (!key) continue;
+    const low = key.toLowerCase();
+    const hit = item.options.find((o) => o.key.toLowerCase() === low)
+      ?? item.options.find((o) => o.label.toLowerCase().startsWith(low));
+    if (hit) { hit.recommended = true; item.recommended = hit.key; }
+  }
+  if (!questions.some((item) => item.options.length >= 2)) return null;
+  return { intro: intro.join('\n').replace(/\n{3,}/g, '\n\n').trim(), questions };
+}
+
+/** The parsed questions in the shape the panel's multiple-choice widget reads. */
+export function choiceQuestions({ questions }) {
+  return questions.map((q) => ({
+    id: q.id,
+    header: q.header ? `${q.id} · ${q.header}` : q.id,
+    question: q.question || q.header || '',
+    multiSelect: false,
+    options: q.options.map((o) => ({
+      label: `(${o.key}) ${o.label}`,
+      description: o.description,
+      ...(o.recommended ? { recommended: true } : {}),
+    })),
+    ...(q.why ? { why: q.why } : {}),
+  }));
 }

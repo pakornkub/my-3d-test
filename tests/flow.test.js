@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Flow } from '../server/flow.mjs';
+import { Flow, parseFrontierQuestions } from '../server/flow.mjs';
+import { validate } from '../src/agents/events.js';
 import { daySeed } from '../server/costs.mjs';
 import { writeOffice, DEFAULTS } from '../server/office.mjs';
 
@@ -25,9 +26,9 @@ function fakeSession(script = {}) {
   };
 }
 
-function setup({ phase = 'implement', feature = null, commands } = {}) {
+function setup({ phase = 'implement', feature = null, commands, reply } = {}) {
   const events = [];
-  const s = fakeSession({ commands });
+  const s = fakeSession({ commands, reply });
   const state = { phase, feature, managerSessionId: null, runningTotals: {} };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
@@ -162,4 +163,123 @@ test('editing daily-budget-usd on disk changes the next snapshot without reconst
   assert.equal(flow.snapshot().dailyBudgetUsd, 5);
   setDailyBudget(flow.repo, 8);
   assert.equal(flow.snapshot().dailyBudgetUsd, 8);
+});
+
+// ---------------------------------------------------------------- frontier questions
+// An ask captured from a real grill session. (Two were captured; they came out
+// byte-identical, so one fixture stands for both.)
+const SAMPLE = [
+  "เอา to-do list app — ก่อนถามต่อ ผมตรวจของจริงมาก่อนหนึ่งอย่าง: **Office Server รองรับหลายโปรเจกต์อยู่แล้ว** (`server/projects.mjs` + `project.add` รับทั้ง path และ clone URL แล้วรัน onboarding 8 ขั้นให้เอง) ฉะนั้น \"ให้ทีมนี้ไปสร้าง to-do app ในอีก repo\" เป็นทางที่ระบบเปิดไว้แล้ว ไม่ต้องสร้างอะไรใหม่เพื่อรองรับ",
+  "",
+  "frontier รอบนี้มีสองข้อ",
+  "",
+  "❓ **Q2** — **โค้ดของ to-do app จะอยู่ที่ไหน**: อันนี้เปลี่ยนทุกอย่างที่ตามมา",
+  "",
+  "(ก) **repo ใหม่ ลงทะเบียนเป็นโปรเจกต์ที่สองของ Office** — ทีมเดิมทั้งหก ผู้จัดการคนเดิม แต่ไปทำงานในบ้านอีกหลัง มี `CONTEXT.md`, ADR, บอร์ดของตัวเอง ไม่ปนกับฉาก 3D",
+  "(ข) **เป็นฟีเจอร์ใน `my-3d-test`** — เช่น แท็บใหม่บนแผงทีม หรือของในห้องที่คลิกแล้วเปิดรายการงาน",
+  "(ค) **repo ที่คุณมีอยู่แล้ว** — บอก path มา ผมให้ onboarding วิ่งแล้วดูว่าขาดอะไร",
+  "",
+  "➡️ **(ก)** — repo นี้มีสัญญาไว้ชัดว่า `export/` คือ site root และ stack บางมาก (three + vite เท่านั้น) การยัด to-do app เข้าไปจะทำให้ `CONTEXT.md` ที่เพิ่งตกลงกันมีสองโดเมนในไฟล์เดียว และ reviewer จะยิง finding ใส่ทุกใบที่แตะ ถ้าแยก repo คุณจะได้ของแถมด้วย: เป็นการพิสูจน์ว่า Office จัดการโปรเจกต์ที่สองได้จริง",
+  "",
+  "---",
+  "",
+  "❓ **Q3** — **ของใช้จริงหรือของสาธิต**: สองอย่างนี้เกณฑ์ \"เสร็จ\" ไม่เหมือนกันเลย",
+  "",
+  "(ก) **ของใช้จริง** — คุณจะเปิดมันทุกวัน ฉะนั้นเรื่อง persistence, การกู้ข้อมูล, ใช้บนมือถือ กลายเป็นข้อบังคับ",
+  "(ข) **ของสาธิต/สนามซ้อม** — เป้าหมายจริงคือทดสอบว่าทีม agent เฟส 2 ทำงานขนานกันได้ไหม to-do เป็นแค่โจทย์ที่เล็กพอจะจับตาดูได้ทั้งกระบวนการ",
+  "(ค) **ทั้งสอง** — เริ่มเป็นสนามซ้อม แต่ถ้าออกมาดีก็ใช้จริง",
+  "",
+  "➡️ **(ข)** — ของค้างบนโต๊ะตอนนี้คือ \"ตัวเลขรายคนบน roster ยังว่างห้าคนเพราะยังไม่มี implementer session จริง\" to-do app เป็นโจทย์ขนาดพอดีที่จะดันเฟส 2 ให้เกิดโดยไม่ต้องเสี่ยงกับ repo ที่มีของจริงอยู่ ถ้าตอบ (ก) ผมจะถามเรื่อง sync/มือถือ/สำรองข้อมูลในรอบหน้าแทน",
+].join('\n');
+
+// The same convention with every decoration dropped: Latin keys, no bold, "-" as the
+// separator, a detail wrapped onto the next line, and a prime on the id.
+const LOOSE = [
+  'สรุปก่อน: ผมอ่าน server/board.mjs มาแล้ว',
+  '',
+  "❓ Q7' - where does the board live: เลือกหนึ่งข้อ",
+  '(a) local disk',
+  '    keeps working offline',
+  '(b) the server - one source of truth',
+  '➡️ (b): fewer copies to reconcile',
+].join('\n');
+
+test('parseFrontierQuestions reads the manager convention: id, title, body, options, recommendation', () => {
+  const p = parseFrontierQuestions(SAMPLE);
+  assert.ok(p, 'the real ask parses');
+  assert.match(p.intro, /^เอา to-do list app/);
+  assert.match(p.intro, /frontier รอบนี้มีสองข้อ$/);
+  assert.ok(!p.intro.includes('❓'), 'the intro stops at the first question');
+  assert.deepEqual(p.questions.map((q) => q.id), ['Q2', 'Q3']);
+
+  const [q2, q3] = p.questions;
+  assert.equal(q2.header, 'โค้ดของ to-do app จะอยู่ที่ไหน');
+  assert.equal(q2.question, 'อันนี้เปลี่ยนทุกอย่างที่ตามมา');
+  assert.deepEqual(q2.options.map((o) => o.key), ['ก', 'ข', 'ค']);
+  assert.equal(q2.options[0].label, 'repo ใหม่ ลงทะเบียนเป็นโปรเจกต์ที่สองของ Office');
+  assert.equal(q2.options[1].label, 'เป็นฟีเจอร์ใน `my-3d-test`');
+  assert.match(q2.options[0].description, /^ทีมเดิมทั้งหก/);
+  assert.equal(q2.recommended, 'ก');
+  assert.deepEqual(q2.options.map((o) => o.recommended), [true, false, false]);
+  assert.match(q2.why, /^repo นี้มีสัญญาไว้ชัด/, 'the why keeps no leading separator');
+
+  assert.equal(q3.header, 'ของใช้จริงหรือของสาธิต');
+  assert.deepEqual(q3.options.map((o) => o.key), ['ก', 'ข', 'ค']);
+  assert.equal(q3.recommended, 'ข');
+  assert.deepEqual(q3.options.map((o) => o.recommended), [false, true, false]);
+  assert.match(q3.why, /^ของค้างบนโต๊ะ/);
+});
+
+test('parseFrontierQuestions is tolerant: no bold, Latin keys, "-" separators, a wrapped detail', () => {
+  const p = parseFrontierQuestions(LOOSE);
+  assert.ok(p);
+  assert.equal(p.intro, 'สรุปก่อน: ผมอ่าน server/board.mjs มาแล้ว');
+  assert.equal(p.questions.length, 1);
+  const q = p.questions[0];
+  assert.equal(q.id, "Q7'");
+  assert.equal(q.header, 'where does the board live');
+  assert.equal(q.question, 'เลือกหนึ่งข้อ');
+  assert.deepEqual(q.options.map((o) => o.key), ['a', 'b']);
+  assert.equal(q.options[0].description, 'keeps working offline', 'a wrapped line joins the option above it');
+  assert.equal(q.options[1].label, 'the server');
+  assert.equal(q.options[1].description, 'one source of truth');
+  assert.equal(q.recommended, 'b');
+  assert.equal(q.why, 'fewer copies to reconcile');
+});
+
+test('parseFrontierQuestions returns null for anything that is not a question with options', () => {
+  assert.equal(parseFrontierQuestions('สรุปแล้วผมจะเริ่มจากใบ 01 ครับ ไม่มีคำถาม'), null);
+  assert.equal(parseFrontierQuestions('❓ อยากได้แบบไหนครับ?'), null, 'a question with no options');
+  assert.equal(parseFrontierQuestions('❓ **Q1** — **ที่เก็บ**: เลือก\n(ก) **อันเดียว** — พอ'), null, 'one option is not a choice');
+  assert.equal(parseFrontierQuestions(''), null);
+  assert.equal(parseFrontierQuestions(undefined), null);
+});
+
+test('a reply written as frontier questions is asked as a multiple choice; anything else stays a plain question', async () => {
+  const a = setup({ phase: 'grill', feature: 'f', reply: () => SAMPLE });
+  await a.flow.onCommand('ทำต่อ');
+  const ask = a.events.filter((e) => e.type === 'flow.ask').at(-1);
+  assert.equal(ask.kind, 'choice');
+  assert.equal(ask.text, SAMPLE, 'the whole reply still travels, unchanged');
+  assert.deepEqual(validate(ask), [], 'still a well-formed flow.ask');
+  assert.match(ask.intro, /^เอา to-do list app/);
+  assert.deepEqual(ask.questions.map((q) => q.id), ['Q2', 'Q3']);
+  assert.equal(ask.questions[0].header, 'Q2 · โค้ดของ to-do app จะอยู่ที่ไหน');
+  assert.equal(ask.questions[0].question, 'อันนี้เปลี่ยนทุกอย่างที่ตามมา');
+  assert.deepEqual(ask.questions[0].options.map((o) => o.label), [
+    '(ก) repo ใหม่ ลงทะเบียนเป็นโปรเจกต์ที่สองของ Office',
+    '(ข) เป็นฟีเจอร์ใน `my-3d-test`',
+    '(ค) repo ที่คุณมีอยู่แล้ว',
+  ]);
+  assert.equal(ask.questions[0].options[0].recommended, true);
+  assert.equal(ask.questions[0].options[1].recommended, undefined, 'only the recommended one carries the flag');
+  assert.match(ask.questions[0].why, /export\//);
+  assert.equal(ask.questions[1].options[1].recommended, true);
+
+  const b = setup({ phase: 'grill', feature: 'f' });   // the harness's canned prose reply
+  await b.flow.onCommand('ทำต่อ');
+  const plain = b.events.filter((e) => e.type === 'flow.ask').at(-1);
+  assert.equal(plain.kind, 'question');
+  assert.equal(plain.questions, undefined);
+  assert.equal(plain.intro, undefined);
 });

@@ -147,6 +147,26 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
     h.className = 'q';
     h.textContent = ev.text;
     askEl.appendChild(h);
+    // the manager's status update before the questions: a short paragraph, click for the rest
+    if (ev.intro) {
+      h.hidden = true;
+      const intro = document.createElement('p');
+      intro.className = 'intro';
+      const full = String(ev.intro).trim();
+      const long = full.length > 200;
+      let shown = false;
+      const paint = () => {
+        intro.textContent = shown || !long ? full : full.slice(0, 200).trimEnd() + '…';
+        intro.classList.toggle('open', shown);
+      };
+      if (long) {
+        intro.classList.add('more');
+        intro.title = 'กดเพื่ออ่านทั้งหมด';
+        intro.addEventListener('click', () => { shown = !shown; paint(); });
+      }
+      paint();
+      askEl.appendChild(intro);
+    }
     if (ev.kind === 'tickets' && Array.isArray(ev.tickets)) {
       const ul = document.createElement('ol');
       for (const t of ev.tickets) {
@@ -159,8 +179,11 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
       }
       askEl.appendChild(ul);
     }
-    // multiple choice (the model's AskUserQuestion): one row of option buttons per question
-    const picks = {};
+    // multiple choice (the model's AskUserQuestion, or the manager's parsed frontier
+    // questions): one row of option buttons per question. Nothing is pre-selected -- the
+    // manager's own recommendation is only a badge, the human still picks.
+    const picks = {};       // question -> the label(s) picked, sent back as flow.answer.answers
+    const summary = new Map();  // question -> "Q2: (ก) label", so the reply text reads back
     if (ev.kind === 'choice' && Array.isArray(ev.questions)) {
       h.hidden = true;
       for (const q of ev.questions) {
@@ -170,22 +193,32 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
         box.querySelector('small').textContent = q.header ?? '';
         box.querySelector('span').textContent = q.question;
         const opts = box.querySelector('.opts');
+        const chosen = new Set();
         for (const o of q.options ?? []) {
           const b = document.createElement('button');
           b.type = 'button';
-          b.innerHTML = `<b></b><i></i>`;
+          b.innerHTML = `<span class="row"><b></b><em class="tag" hidden>แนะนำ</em></span><i></i>`;
           b.querySelector('b').textContent = o.label;
+          b.querySelector('.tag').hidden = !o.recommended;
           b.querySelector('i').textContent = o.description ?? '';
           b.addEventListener('click', () => {
             if (q.multiSelect) {
               b.classList.toggle('on');
-              picks[q.question] = [...opts.querySelectorAll('button.on b')].map((x) => x.textContent).join(', ');
+              chosen.has(o) ? chosen.delete(o) : chosen.add(o);
+              picks[q.question] = (q.options ?? []).filter((x) => chosen.has(x)).map((x) => x.label).join(', ');
             } else {
-              for (const x of opts.children) x.classList.toggle('on', x === b);
+              for (const x of opts.querySelectorAll('button')) x.classList.toggle('on', x === b);
               picks[q.question] = o.label;
             }
+            summary.set(q.question, (q.id ? q.id + ': ' : '') + picks[q.question]);
           });
           opts.appendChild(b);
+          if (o.recommended && q.why) {
+            const why = document.createElement('p');
+            why.className = 'why';
+            why.textContent = q.why;
+            opts.appendChild(why);
+          }
         }
         askEl.appendChild(box);
       }
@@ -199,7 +232,9 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
       const text = form.querySelector('input').value.trim();
       const answers = Object.keys(picks).length ? { ...picks } : undefined;
       if (ev.kind === 'choice' && !answers && !text) return;
-      answerAsk(ev.askId, { text: text || Object.values(picks).join(' · '), approved: !isQ, answers });
+      const picked = (ev.questions ?? []).map((q) => summary.get(q.question)).filter(Boolean);
+      const reply = [picked.join(' · ') || Object.values(picks).join(' · '), text].filter(Boolean).join('\n');
+      answerAsk(ev.askId, { text: reply, approved: !isQ, answers });
     });
     askEl.appendChild(form);
     setTimeout(() => form.querySelector('input').focus(), 50);
