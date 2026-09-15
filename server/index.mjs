@@ -197,10 +197,13 @@ async function handle(msg, ws) {
       // a multiple-choice question from a tool call is answered through permissions; a
       // conversational question goes back into the manager session as the next turn
       if (approvals.answerText(msg.askId, msg)) break;
-      flow?.onFlowAnswer(msg.askId, msg).catch((e) => broadcast(make('error', { message: e.message })));
+      // a message that lands before activate() finished used to vanish; say so instead
+      if (!flow) { unicast(ws, make('error', { message: 'server ยังเปิดโปรเจกต์ไม่เสร็จ ส่งคำตอบอีกครั้ง' })); break; }
+      flow.onFlowAnswer(msg.askId, msg).catch((e) => broadcast(make('error', { message: e.message })));
       break;
     case 'flow.next':
-      flow?.onNext(msg.phase).then(() => maybeStartPipeline()).catch((e) => broadcast(make('error', { message: e.message })));
+      if (!flow) { unicast(ws, make('error', { message: 'server ยังเปิดโปรเจกต์ไม่เสร็จ สั่งอีกครั้ง' })); break; }
+      flow.onNext(msg.phase).then(() => maybeStartPipeline()).catch((e) => broadcast(make('error', { message: e.message })));
       break;
     case 'ticket.retry':
       if (!pipeline?.requeue(msg.ticket, msg.stage ?? null)) broadcast(make('error', { message: 'ไม่พบใบ ' + msg.ticket }));
