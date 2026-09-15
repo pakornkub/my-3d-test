@@ -120,6 +120,45 @@ export function pickImplementer(ticketText, idle) {
   return best?.id ?? null;
 }
 
+// ---------------------------------------------------------------- what a ticket really cost
+// A ticket's money is folded in as it is spent, not summed once at the close: an attempt that
+// timed out, hit the usage limit or ended in a merge conflict spent real money too, and the first
+// overnight run reported $19.97 of a ~$40 spend because only the sessions that closed a ticket
+// were counted. `usd` is everything the ticket has ever cost; `usdAttempt` is what the attempt in
+// flight has spent so far -- the part that becomes `usdWasted` when that attempt ends without
+// closing the ticket (a retry, an escalation), so a report can say what went to retries.
+
+/** Folds one session's spend into a job record. A non-positive or malformed figure changes nothing. */
+export function chargeJob(job, usd) {
+  const n = Number(usd);
+  if (!job || !Number.isFinite(n) || n <= 0) return job;
+  job.usd = (job.usd ?? 0) + n;
+  job.usdAttempt = (job.usdAttempt ?? 0) + n;
+  return job;
+}
+
+/** The attempt in flight ended without closing the ticket: its spend stays in `usd` and is counted as waste too. Idempotent. */
+export function wasteAttempt(job) {
+  if (!job) return job;
+  job.usdWasted = (job.usdWasted ?? 0) + (job.usdAttempt ?? 0);
+  job.usdAttempt = 0;
+  return job;
+}
+
+/** The per-person cost rows of the level-2 report: every attempt of every ticket, not only the ones that closed. */
+export function featureCosts(jobs, managerUsd = 0) {
+  const costs = {};
+  for (const j of Object.values(jobs ?? {})) {
+    const k = j.agent ?? 'unknown';
+    costs[k] = costs[k] ?? { sessions: 0, usd: 0, usdWasted: 0 };
+    costs[k].sessions += j.attempt ?? 1;
+    costs[k].usd += j.usd ?? 0;
+    costs[k].usdWasted += j.usdWasted ?? 0;
+  }
+  costs.manager = { sessions: 1, usd: managerUsd, usdWasted: 0 };
+  return costs;
+}
+
 /**
  * The browser Playwright MCP should drive: its own Chromium when `npx playwright install
  * chromium` succeeded, else the machine's Chrome or Edge (the CDN download is not always
@@ -260,9 +299,9 @@ export class Pipeline {
       job.promise = this.runTicket(t, agent, job).catch((e) => {
         this.emit(make('error', { agent, ticket: t.id, message: `pipeline: ${e.message ?? e}` }));
         this.#escalate(t, `pipeline error: ${tail(String(e.stack ?? e), 400)}`);
-      }).finally(() => { this.running.delete(t.id); this.tick(); this.#maybeFeatureReport(); });
+      }).finally(() => { this.running.delete(t.id); this.tick(); this.#reportWhenDone(); });
     }
-    if (!this.running.size) this.#maybeFeatureReport();
+    if (!this.running.size) this.#reportWhenDone();
   }
 
   // ---------------------------------------------------------------- one ticket
@@ -307,6 +346,15 @@ export class Pipeline {
       session.start();
       return session;
     };
+    // an implementer session's costUsd is that session's running total: charge the delta after
+    // every turn, so a session that never reaches the close still lands in state.jobs[id].usd
+    let implCharged = 0;
+    const chargeImpl = () => {
+      const delta = (session?.costUsd ?? 0) - implCharged;
+      implCharged += delta;
+      chargeJob(st, delta);
+      this.save();
+    };
     const limited = (sess) => sess?.limited;
     const pauseFor = (stage, why) => {
       // the account's usage limit, not the ticket's fault: park the job at this stage and try later
@@ -327,6 +375,7 @@ export class Pipeline {
         ticketText,
       ].join('\n');
       res = await impl().send(implementPrompt);
+      chargeImpl();
       parsed = parseImplementResult(session.lastText);
       if (limited(session)) return pauseFor('implement', 'implementer hit the usage limit');
       if (res?.ended || session.timedOut || res?.subtype?.startsWith('error')) {
@@ -366,12 +415,14 @@ export class Pipeline {
           review = { verdict: 'pass', standards: [], spec: [], usd: 0, byHuman: true };
           this.emit(make('review.result', { agent: REVIEWER, ticket: id, assignee: agent, standards: [], spec: [], verdict: 'pass', byHuman: true }));
         } else review = await this.#review(t, w);
+        chargeJob(st, review.usd); this.save();          // every round's reviewer, not just the last
         if (review.limited) return pauseFor('review', 'reviewer hit the usage limit');
         if (review.verdict !== 'pass') {
           feedback = `reviewer ส่งกลับ:\nSPEC: ${review.spec.join('; ') || 'none'}\nSTANDARDS: ${review.standards.join('; ') || 'none'}\n\nแก้ finding เชิง SPEC ให้ครบ (STANDARDS เป็นคำแนะนำ ทำเฉพาะที่ไม่บานปลาย) แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
         } else if (this.policy.verify !== 'none') {
           st.stage = 'verify'; this.save();
           verify = await this.#verify(t, w);
+          chargeJob(st, verify.usd); this.save();        // every round's QA, not just the last
           if (verify.limited) return pauseFor('verify', 'QA hit the usage limit');
           if (verify.verdict !== 'pass') {
             feedback = `QA ตรวจรับไม่ผ่าน (${verify.criteria.filter((c) => !c.pass).length} ข้อ):\n` + verify.criteria.filter((c) => !c.pass).map((c) => `- ${c.text}${c.note ? ' — ' + c.note : ''}`).join('\n') + `\n\nREPRO: ${verify.repro || '-'}\n\nแก้แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
@@ -390,6 +441,7 @@ export class Pipeline {
       st.stage = 'implement'; this.save();
       const fresh = !session;
       res = await impl().send((fresh ? header + '\nworktree นี้มีงานที่ commit ไว้แล้ว ดู git log ก่อน\n\n' : '') + feedback);
+      chargeImpl();
       parsed = parseImplementResult(session.lastText);
       if (limited(session)) return pauseFor(review && review.verdict !== 'pass' ? 'review' : 'gates', 'implementer hit the usage limit');
       if (res?.ended || session.timedOut || res?.subtype?.startsWith('error')) {
@@ -403,12 +455,11 @@ export class Pipeline {
 
     // ---- close: merge, report, board
     st.stage = 'close'; this.save();
-    const usd = (st.usd ?? 0) + (session?.costUsd ?? 0) + (review?.usd ?? 0) + (verify?.usd ?? 0);
-    st.usd = usd;
     const commits = wt.ticketCommits(this.repo, this.feature, id);
     if (!commits.length) {
       // nothing committed: ask once for a commit, then escalate
       await impl().send(header + '\n\nยังไม่มี commit บน branch นี้ ให้ git add และ git commit งานทั้งหมดตอนนี้ แล้วตอบสั้นๆ');
+      chargeImpl();
       if (!wt.ticketCommits(this.repo, this.feature, id).length) {
         session?.close();
         return this.#escalate(t, 'implementer ไม่ได้ commit งาน');
@@ -420,8 +471,9 @@ export class Pipeline {
       return this.#escalate(t, `merge เข้า ${wt.featureBranch(this.feature)} ชนกันที่: ${merge.files.join(', ') || merge.error}`);
     }
     const diff = wt.diffStat(this.repo, this.project.mainBranch, wt.featureBranch(this.feature));
+    const usd = st.usd ?? 0, usdWasted = st.usdWasted ?? 0;   // every attempt and round of this ticket
     const report = ticketReport({
-      id, title: t.title, agent, branch: w.branch, attempt: st.attempt, ms: Date.now() - t0, usd,
+      id, title: t.title, agent, branch: w.branch, attempt: st.attempt, ms: Date.now() - t0, usd, usdWasted,
       what: parsed.what, gates, review, verify, criteria: t.criteria,
       open: [parsed.next && !/none|ไม่มี/i.test(parsed.next) ? `implementer: ${parsed.next}` : null].filter(Boolean),
       diffStat: wt.diffStat(this.repo, wt.featureBranch(this.feature), w.branch) || diff,
@@ -435,8 +487,8 @@ export class Pipeline {
       if (re.test(txt)) fs.writeFileSync(t.file, txt.replace(re, `- [x] ${c.text}`));
     }
     appendComment(t.file, report);
-    st.stage = 'done'; st.finishedAt = Date.now(); this.save();
-    this.#metrics({ ticket: id, agent, attempts: st.attempt, rounds, gates: gates.map((g) => [g.gate, g.pass]), review: review?.verdict, verify: verify?.verdict, ms: Date.now() - t0, usd, escalated: false });
+    st.stage = 'done'; st.finishedAt = Date.now(); st.usdAttempt = 0; this.save();
+    this.#metrics({ ticket: id, agent, attempts: st.attempt, rounds, gates: gates.map((g) => [g.gate, g.pass]), review: review?.verdict, verify: verify?.verdict, ms: Date.now() - t0, usd, usdWasted, escalated: false });
     this.emit(make('ticket.closed', { ticket: id, assignee: agent, report, diffStat: diff }));
     session?.close();
     this.emitBoard();
@@ -538,6 +590,7 @@ export class Pipeline {
 
   #retryOrEscalate(t, agent, job) {
     const st = this.state.jobs[t.id];
+    wasteAttempt(st); this.save();   // this attempt is being redone: what it spent was retry money
     const maxAttempts = num(this.policy.attempts, 2);
     if (st.attempt >= maxAttempts) return this.#escalate(t, st.retryNote ?? 'หมดรอบ');
     st.stage = 'pending'; this.save();
@@ -547,30 +600,29 @@ export class Pipeline {
 
   #escalate(t, reason) {
     const st = this.state.jobs[t.id] ?? (this.state.jobs[t.id] = {});
+    wasteAttempt(st);
     st.stage = 'escalated'; st.reason = reason; this.save();
     setTicketField(t.file, 'Status', 'ready-for-human');
     appendComment(t.file, `> *ส่งต่อให้คนโดย Office Server*\n\n${reason}`);
-    this.#metrics({ ticket: t.id, agent: st.agent, attempts: st.attempt, escalated: true, reason, usd: st.usd ?? 0 });
+    this.#metrics({ ticket: t.id, agent: st.agent, attempts: st.attempt, escalated: true, reason, usd: st.usd ?? 0, usdWasted: st.usdWasted ?? 0 });
     this.emit(make('ticket.escalated', { ticket: t.id, reason, agent: st.agent }));
     this.emitBoard();
   }
 
   // ---------------------------------------------------------------- feature report
-  async #maybeFeatureReport() {
+  /** tick() fires the report and walks away: a throw in there must not become an unhandled rejection. */
+  #reportWhenDone() {
+    this.maybeFeatureReport().catch((e) => this.emit(make('error', { message: `feature report: ${e.message ?? e}` })));
+  }
+
+  async maybeFeatureReport() {
     if (!this.active || this.reported || this.running.size) return;
     const tickets = this.board();
     if (!tickets.length) return;
     const open = tickets.filter((t) => ['ready', 'blocked', 'in-progress', 'review', 'verify'].includes(t.status));
     if (open.length) return;
     this.reported = true;
-    const costs = {};
-    for (const [id, j] of Object.entries(this.state.jobs)) {
-      const k = j.agent ?? 'unknown';
-      costs[k] = costs[k] ?? { sessions: 0, usd: 0 };
-      costs[k].sessions += j.attempt ?? 1;
-      costs[k].usd += j.usd ?? 0;
-    }
-    costs.manager = { sessions: 1, usd: managerRunningTotal(this.state) };
+    const costs = featureCosts(this.state.jobs, managerRunningTotal(this.state));
     const branch = wt.featureBranch(this.feature);
     const diff = wt.diffStat(this.repo, this.project.mainBranch, branch);
     const prompt = featureReportPrompt({
@@ -580,11 +632,20 @@ export class Pipeline {
         verify: this.state.jobs[t.id]?.stage === 'done' ? 'ผ่าน' : '-' })),
       costs, diffStat: diff, spec: `.scratch/${this.feature}/spec.md`,
     });
-    let report = await this.managerTurn(prompt);
-    let errs = validateReport(report ?? '', 2);
-    if (errs.length) {
-      report = await this.managerTurn(`รายงานยังไม่ตรง template: ${errs.join(', ')} เขียนใหม่ทั้งฉบับให้ครบ 7 หัวข้อตามลำดับ`);
+    let report, errs;
+    try {
+      report = await this.managerTurn(prompt);
       errs = validateReport(report ?? '', 2);
+      if (errs.length) {
+        report = await this.managerTurn(`รายงานยังไม่ตรง template: ${errs.join(', ')} เขียนใหม่ทั้งฉบับให้ครบ 7 หัวข้อตามลำดับ`);
+        errs = validateReport(report ?? '', 2);
+      }
+    } catch (e) {
+      // the manager's turn blew up (dead session, usage limit): no report was written, so put the
+      // claim back instead of leaving `reported` set on a report that does not exist
+      this.reported = false; this.state.featureReported = false; this.save();
+      this.emit(make('error', { message: `feature report: ${e.message ?? e}` }));
+      return;
     }
     this.state.featureReported = true; this.save();
     this.emit(make('feature.report', { feature: this.feature, report: report ?? '(ไม่มีรายงาน)', valid: !errs.length, diffStat: diff }));
