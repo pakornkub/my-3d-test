@@ -20,11 +20,27 @@ test('parseImplementResult reads RESULT/EVIDENCE/NEXT and the summary bullets', 
 });
 
 test('parseReviewResult splits finding lists and treats none as empty', () => {
-  const r = parseReviewResult('...\nVERDICT: fail\nSTANDARDS: Duplicated Code in x; Mysterious Name y\nSPEC: none');
+  const r = parseReviewResult('...\nVERDICT: fail\nSTANDARDS: Duplicated Code in x; Mysterious Name y\nSPEC: missing field z');
   assert.equal(r.verdict, 'fail');
   assert.equal(r.standards.length, 2);
-  assert.deepEqual(r.spec, []);
+  assert.deepEqual(r.spec, ['missing field z']);
+  assert.equal(r.byRule, undefined);
   assert.equal(parseReviewResult('no verdict line').verdict, 'fail');
+});
+
+test('parseReviewResult lets the Spec list decide: standards-only or empty fails pass by rule, a pass is never overruled', () => {
+  // the two escalations of the first overnight run: `fail` above two empty lists
+  const empty = parseReviewResult('VERDICT: fail\nSTANDARDS: none\nSPEC: none');
+  assert.equal(empty.verdict, 'pass');
+  assert.equal(empty.byRule, true);
+  const advice = parseReviewResult('VERDICT: fail\nSTANDARDS: Long Function in a.js; today()/dayOf() ซ้ำกัน\nSPEC: none');
+  assert.equal(advice.verdict, 'pass');
+  assert.equal(advice.standards.length, 2);
+  assert.equal(advice.byRule, true);
+  const pass = parseReviewResult('VERDICT: pass\nSTANDARDS: none\nSPEC: nit, non-blocking');
+  assert.equal(pass.verdict, 'pass');
+  assert.equal(pass.byRule, undefined);
+  assert.equal(parseReviewResult('VERDICT: pass\nSTANDARDS: none\nSPEC: none').byRule, undefined);
 });
 
 test('parseVerifyResult maps CRITERION lines onto the ticket criteria in order', () => {
@@ -41,6 +57,17 @@ test('pickImplementer prefers the specialty that matches the ticket text', () =>
   assert.equal(pickImplementer('roster row in src/ui.js', ['eng_m1', 'eng_f1']), 'eng_m1');
   assert.equal(pickImplementer('anything', ['eng_m2']), 'eng_m2');
   assert.equal(pickImplementer('x', []), null);
+});
+
+// ---------------------------------------------------------------- servers
+test('startOfficeServer pins the worktree and hands the port over as OFFICE_PORT', async () => {
+  const port = 40000 + Math.floor(Math.random() * 20000);
+  // the fake server refuses to listen unless it was started the way index.mjs expects
+  const cmd = `node -e "if (process.env.OFFICE_PASSIVE !== '1' || !process.env.OFFICE_PROJECT) process.exit(1); require('net').createServer().listen(process.env.OFFICE_PORT)"`;
+  const srv = await wt.startOfficeServer(cmd, process.cwd(), port, 15_000);
+  assert.ok(srv, 'server answered on its port');
+  assert.equal(srv.url, `ws://localhost:${port}/office`);
+  srv.stop();
 });
 
 // ---------------------------------------------------------------- report

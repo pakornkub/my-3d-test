@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install
 npm run dev            # Vite only (mock-driven scene). .claude/launch.json uses --port 5180 --strictPort
-npm run office         # Office Server only, ws://localhost:5181/office
+npm run office         # Office Server only, ws://localhost:5181/office (OFFICE_PORT / OFFICE_PROJECT / OFFICE_PASSIVE=1: a pinned, passive rehearsal server -- see server/README.md)
 npm run dev:all        # both, Vite pinned to 5180 -- what vite.config.js's /office proxy assumes
 npm test               # node --test "tests/**/*.test.js" (node's runner, no framework)
 npm run build          # -> dist/

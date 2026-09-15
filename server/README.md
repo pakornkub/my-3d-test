@@ -6,6 +6,9 @@ talks to Claude; it talks to this server over one WebSocket, and this server run
 
 ```
 npm run office          # server only, ws://localhost:5181/office
+# OFFICE_PORT=5182 OFFICE_PROJECT=<repo> OFFICE_PASSIVE=1 npm run office
+#                       # a pinned, passive rehearsal server: answers scenes, never onboards,
+#                       # runs the pipeline or merges -- what QA gets per ticket worktree
 npm run dev:all         # server + Vite dev server together
 ```
 
@@ -73,9 +76,13 @@ implementers, up to `max-parallel`. Per ticket:
    `feature/<feature>` (created from main on first use); `npm ci` inside; `db:` command if set
 3. **implement** — fresh session, `/implement` + the ticket text; must commit on that branch
 4. **gates** — the server runs `test`, `typecheck`, `e2e` from `docs/agents/office.md`
-5. **review** — reviewer session, `/code-review` against the feature branch
-6. **verify** — QA session; `exploratory` starts the worktree's dev server on
-   `port-base + n` and hands the QA Playwright MCP (`npx @playwright/mcp`, needs
+5. **review** — reviewer session, `/code-review` against the feature branch. Only a SPEC
+   finding fails the ticket; STANDARDS are advice (`parseReviewResult`): a `VERDICT: fail`
+   over `SPEC: none` passes by rule and the level-1 report says so
+6. **verify** — QA session; `exploratory` starts the worktree's own Office Server
+   (the `office` command, passive and pinned to the worktree, on `port-base + 40 + n`) and the
+   worktree's dev server on `port-base + n` with `OFFICE_PORT` pointing at it, so the scene
+   QA drives talks to the diff's server code; then hands the QA Playwright MCP (`npx @playwright/mcp`, needs
    `npx playwright install chromium` once); `scripted` runs commands only; `none` skips
 7. **close** — merge `--no-ff` into the feature branch, level-1 report appended to the ticket
    under `## Comments`, `Status: done`, other open worktrees rebased, ticket worktree removed

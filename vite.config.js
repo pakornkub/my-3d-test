@@ -16,7 +16,9 @@ export default defineConfig({
     open: true,
     // the scene talks to the Office Server (server/index.mjs) over one WebSocket path, so the
     // browser only ever sees the Vite origin -- no CORS, no second port to remember
-    proxy: { '/office': { target: 'ws://localhost:5181', ws: true, rewriteWsOrigin: true } },
+    // OFFICE_PORT lets a ticket worktree's dev server reach that worktree's own Office Server
+    // (server/pipeline.mjs starts one per QA run) instead of the shared one
+    proxy: { '/office': { target: `ws://localhost:${process.env.OFFICE_PORT ?? 5181}`, ws: true, rewriteWsOrigin: true } },
   },
   build: { outDir: 'dist', assetsInlineLimit: 0 },
 });

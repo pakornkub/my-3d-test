@@ -80,13 +80,23 @@ export function parseImplementResult(text = '') {
   return { result, evidence, next, what };
 }
 
+/**
+ * The verdict follows the team's own rule (team/eng_f2.md): a Spec finding fails the ticket,
+ * Standards findings are advice. A `VERDICT: fail` above `SPEC: none` is therefore a pass by
+ * rule (`byRule: true`, so the report can say so) -- the first overnight run escalated two
+ * tickets on exactly that line and spent three fix rounds on standards-only findings. A
+ * reviewer's `pass` is never overruled, and no VERDICT line at all stays a fail: the
+ * reviewer never finished.
+ */
 export function parseReviewResult(text = '') {
-  const verdict = /VERDICT:\s*(pass|fail)/i.exec(text)?.[1]?.toLowerCase() ?? 'fail';
+  const said = /VERDICT:\s*(pass|fail)/i.exec(text)?.[1]?.toLowerCase() ?? null;
   const list = (key) => {
     const raw = new RegExp(`${key}:\\s*(.+)`, 'i').exec(text)?.[1]?.trim() ?? '';
     return /^none\b/i.test(raw) || !raw ? [] : raw.split(/\s*;\s*/).filter(Boolean);
   };
-  return { verdict, standards: list('STANDARDS'), spec: list('SPEC') };
+  const standards = list('STANDARDS'), spec = list('SPEC');
+  const verdict = !said ? 'fail' : said === 'pass' || !spec.length ? 'pass' : 'fail';
+  return { verdict, standards, spec, ...(said && said !== verdict ? { byRule: true } : {}) };
 }
 
 export function parseVerifyResult(text = '', criteria = []) {
@@ -358,7 +368,7 @@ export class Pipeline {
         } else review = await this.#review(t, w);
         if (review.limited) return pauseFor('review', 'reviewer hit the usage limit');
         if (review.verdict !== 'pass') {
-          feedback = `reviewer ส่งกลับ:\nSTANDARDS: ${review.standards.join('; ') || 'none'}\nSPEC: ${review.spec.join('; ') || 'none'}\n\nแก้ตาม finding แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
+          feedback = `reviewer ส่งกลับ:\nSPEC: ${review.spec.join('; ') || 'none'}\nSTANDARDS: ${review.standards.join('; ') || 'none'}\n\nแก้ finding เชิง SPEC ให้ครบ (STANDARDS เป็นคำแนะนำ ทำเฉพาะที่ไม่บานปลาย) แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
         } else if (this.policy.verify !== 'none') {
           st.stage = 'verify'; this.save();
           verify = await this.#verify(t, w);
@@ -468,7 +478,7 @@ export class Pipeline {
       r.limited = !!s.limited;
       s.close();
       if (r.limited) return r;
-      this.emit(make('review.result', { agent: REVIEWER, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, standards: r.standards, spec: r.spec, verdict: r.verdict }));
+      this.emit(make('review.result', { agent: REVIEWER, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, standards: r.standards, spec: r.spec, verdict: r.verdict, ...(r.byRule ? { byRule: true } : {}) }));
       return r;
     });
   }
@@ -477,10 +487,17 @@ export class Pipeline {
     return this.locks[QA].run(async () => {
       this.emit(make('agent.start', { agent: QA, ticket: t.id, brief: `ตรวจรับใบ ${t.id} (${t.criteria.length} ข้อ)`, mode: 'verify' }));
       const exploratory = this.policy.verify === 'exploratory';
-      let dev = null;
+      let dev = null, office = null;
       if (exploratory && this.commands.dev) {
-        const port = num(this.office?.worktree?.['port-base'], 3100) + 1 + (this.slot++ % 40);
-        dev = await wt.startDevServer(this.commands.dev, w.path, port);
+        const base = num(this.office?.worktree?.['port-base'], 3100), n = this.slot++ % 40;
+        const port = base + 1 + n, officePort = base + 41 + n;
+        // the worktree's own Office Server (passive, pinned to the worktree) first, so the dev
+        // server's /office proxy reaches the diff's server code instead of the shared one on :5181
+        if (this.commands.office) {
+          office = await wt.startOfficeServer(this.commands.office, w.path, officePort);
+          if (!office) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `Office Server ของ worktree ไม่ขึ้นที่ :${officePort} ข้อที่ต้องใช้ server ของ diff นี้จะถูก skip` }));
+        }
+        dev = await wt.startDevServer(this.commands.dev, w.path, port, 40_000, office ? { OFFICE_PORT: String(officePort) } : {});
         if (!dev) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `dev server ไม่ขึ้นที่ :${port} ตรวจได้เฉพาะแบบ scripted` }));
       }
       const browser = qaBrowser();
@@ -493,14 +510,16 @@ export class Pipeline {
         `ตรวจรับใบ ${t.id}: ${t.title}`,
         `ไฟล์ ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')} · spec: .scratch/${this.feature}/spec.md`,
         `โหมด: ${this.policy.verify}` + (dev ? ` · หน้าเว็บของ worktree นี้เปิดอยู่ที่ ${dev.url} (ใช้เครื่องมือ playwright: navigate, click, evaluate, screenshot)` : ''),
-        `คำสั่งที่รันได้: ${Object.entries(this.commands).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')}`,
+        `คำสั่งที่รันได้: ${Object.entries(this.commands).filter(([k, v]) => v && k !== 'office').map(([k, v]) => `${k}: ${v}`).join(' · ')}`,
         '',
         'Acceptance criteria:',
         criteria,
         '',
         'ทำทีละข้อ เก็บหลักฐานลง .scratch/' + this.feature + '/issues/' + t.id + '/verify/ (สร้างโฟลเดอร์ได้)',
         'ข้อที่ต้องใช้เบราว์เซอร์แต่ไม่มีเบราว์เซอร์ให้ตอบ skip พร้อมเหตุผล ไม่ใช่ fail',
-        'Office Server ที่ ws://localhost:5181 รันโค้ดของ branch หลัก ไม่ใช่ของ worktree นี้: ข้อที่ต้องให้ server ส่งข้อมูลใหม่จาก diff นี้ (เช่น field ใหม่ใน hello/snapshot) หรือต้องหยุด server นั้น ให้ตอบ skip พร้อมเหตุผล ห้ามนับเป็น fail และห้ามหยุดหรือรบกวน server ที่ใช้ร่วมกัน',
+        office
+          ? `Office Server ของ worktree นี้ (รันโค้ดของ diff นี้) เปิดอยู่ที่ ${office.url} แบบ passive: ผูกโปรเจกต์นี้ไว้แล้ว ไม่ทำ onboarding ไม่รัน pipeline และหน้าเว็บที่ ${dev?.url ?? '(dev server ไม่ขึ้น)'} เชื่อมกับ server นี้อยู่แล้ว ข้อที่ต้องให้ manager คุยกับ Claude จริง หรือต้องหยุด/รีสตาร์ต server ให้ตอบ skip พร้อมเหตุผล ห้ามแตะ server กลางที่ ws://localhost:5181`
+          : 'Office Server ที่ ws://localhost:5181 รันโค้ดของ branch หลัก ไม่ใช่ของ worktree นี้: ข้อที่ต้องให้ server ส่งข้อมูลใหม่จาก diff นี้ (เช่น field ใหม่ใน hello/snapshot) หรือต้องหยุด server นั้น ให้ตอบ skip พร้อมเหตุผล ห้ามนับเป็น fail และห้ามหยุดหรือรบกวน server ที่ใช้ร่วมกัน',
         'อย่าแก้ไฟล์ของโปรเจกต์เพื่อทดสอบ ถ้าข้อไหนต้องแก้ไฟล์นอก .scratch ให้ตอบ skip',
         'จบด้วยบรรทัดต่อข้อ "CRITERION n: pass|fail|skip — หลักฐานสั้นๆ" แล้วตามด้วย VERDICT / CRITERIA / REPRO (VERDICT เป็น fail เมื่อมีข้อใด fail)',
       ].join('\n');
@@ -510,6 +529,7 @@ export class Pipeline {
       r.limited = !!s.limited;
       s.close();
       dev?.stop();
+      office?.stop();
       if (r.limited) return r;
       this.emit(make('verify.result', { agent: QA, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, criteria: r.criteria, verdict: r.verdict, repro: r.repro }));
       return r;

@@ -9,7 +9,7 @@ import path from 'node:path';
 export const OFFICE_FILE = 'docs/agents/office.md';
 
 export const DEFAULTS = {
-  commands: { dev: '', test: '', typecheck: '', e2e: '', db: '' },
+  commands: { dev: '', test: '', typecheck: '', e2e: '', db: '', office: '' },
   worktree: { 'port-base': '3100', 'db-per-worktree': 'none', 'env-template': '' },
   policy: {
     verify: 'scripted',
@@ -52,7 +52,7 @@ export function renderOffice(o) {
   const sec = (name, obj, comments = {}) => `## ${name}\n` + Object.entries(obj)
     .map(([k, v]) => `${k}: ${v}${comments[k] ? `    # ${comments[k]}` : ''}`).join('\n');
   return `# Office\n\nสิ่งที่ทีม agent ต้องรู้เกี่ยวกับ repo นี้ แก้ไฟล์นี้ได้เลย server อ่านใหม่ทุกครั้งที่เริ่มงาน\n\n`
-    + sec('Commands', o.commands, { dev: 'ใช้ {port} แทนพอร์ต', db: 'รันในทุก worktree ใหม่' }) + '\n\n'
+    + sec('Commands', o.commands, { dev: 'ใช้ {port} แทนพอร์ต', db: 'รันในทุก worktree ใหม่', office: 'Office Server ของ worktree สำหรับ QA รับพอร์ตทาง OFFICE_PORT' }) + '\n\n'
     + sec('Worktree', o.worktree, { 'db-per-worktree': 'none | sqlite-file | postgres-docker | shared' }) + '\n\n'
     + sec('Policy', o.policy, { verify: 'none | scripted | exploratory', 'bash-allowlist': 'คั่นด้วย , จับคู่ตามคำขึ้นต้น' }) + '\n';
 }
@@ -78,6 +78,7 @@ export function guessCommands(repo) {
     else if (fs.existsSync(path.join(repo, 'tsconfig.json'))) c.typecheck = 'npx tsc --noEmit';
     if (s.e2e) c.e2e = 'npm run e2e';
     else if (pkg.devDependencies?.['@playwright/test']) c.e2e = 'npx playwright test';
+    if (s.office) c.office = 'npm run office';
     if (pkg.dependencies?.['@prisma/client'] || pkg.devDependencies?.prisma) c.db = 'npx prisma migrate dev';
   } else if (fs.existsSync(path.join(repo, 'pyproject.toml'))) {
     c.test = 'python -m pytest';

@@ -156,10 +156,20 @@ export function openPullRequest(repo, feature, { mainBranch = 'main', title, bod
   } catch (e) { return { ok: false, error: String(e.stderr ?? e.message ?? e).slice(-300) }; }
 }
 
-/** Start the project's dev server inside a worktree on a given port; resolves with a stop() once it answers. */
-export function startDevServer(command, cwd, port, timeoutMs = 40_000) {
+/**
+ * The worktree's own Office Server for QA: pinned to the worktree and passive (no onboarding,
+ * no pipeline, no merge -- see the OFFICE_* block at the top of index.mjs), on its own port so
+ * it never competes with the shared server on :5181. Resolves like startDevServer.
+ */
+export function startOfficeServer(command, cwd, port, timeoutMs = 40_000) {
+  return startDevServer(command, cwd, port, timeoutMs, { OFFICE_PORT: String(port), OFFICE_PROJECT: cwd, OFFICE_PASSIVE: '1' })
+    .then((r) => r && { ...r, url: `ws://localhost:${port}/office` });
+}
+
+/** Start the project's dev server inside a worktree on a given port; resolves with a stop() once it answers. `env` is merged over the process environment. */
+export function startDevServer(command, cwd, port, timeoutMs = 40_000, env = {}) {
   const cmd = command.replace('{port}', String(port));
-  const child = spawn(cmd, { cwd, shell: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, BROWSER: 'none', CI: '1', PORT: String(port) } });
+  const child = spawn(cmd, { cwd, shell: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, BROWSER: 'none', CI: '1', PORT: String(port), ...env } });
   const stop = () => {
     if (process.platform === 'win32') { try { execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* gone */ } }
     try { child.kill(); } catch { /* gone */ }

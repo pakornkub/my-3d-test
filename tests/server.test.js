@@ -88,6 +88,7 @@ test('office.md round-trips and the allowlist blocks chained and pushing command
   const back = parseOffice(renderOffice(o));
   assert.equal(back.commands.dev, 'npm run dev -- --port {port}');
   assert.equal(back.policy.verify, 'scripted');
+  assert.ok('office' in back.commands, 'the QA office command round-trips even when empty');
   const rules = allowlistRules(back.policy);
   assert.ok(commandAllowed('npm test', rules));
   assert.ok(commandAllowed('git status --porcelain', rules));

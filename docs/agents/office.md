@@ -8,6 +8,7 @@ test: npm test
 typecheck: 
 e2e: 
 db:     # รันในทุก worktree ใหม่
+office: npm run office    # Office Server ของ worktree สำหรับ QA รับพอร์ตทาง OFFICE_PORT
 
 ## Worktree
 port-base: 3100

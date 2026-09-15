@@ -24,9 +24,17 @@ import { teamHash } from './team.mjs';
 
 const PORT = Number(process.env.OFFICE_PORT ?? 5181);
 const VERSION = 'ube-office-server/0.1';
+// A rehearsal server for QA (pipeline.mjs starts one per ticket worktree via
+// worktree.mjs:startOfficeServer): OFFICE_PROJECT pins the repo without reading or writing the
+// registry, OFFICE_PASSIVE=1 keeps it to answering scenes -- no onboarding, no pipeline, no
+// merge -- so the diff's server code can be tested next to the shared server on :5181.
+const PINNED = process.env.OFFICE_PROJECT ? path.resolve(process.env.OFFICE_PROJECT) : null;
+const PASSIVE = process.env.OFFICE_PASSIVE === '1';
 
 const team = loadTeam();
-const reg = loadRegistry();
+const reg = PINNED
+  ? { current: path.basename(PINNED), projects: [{ id: path.basename(PINNED), path: PINNED, mainBranch: 'main' }] }
+  : loadRegistry();
 const clients = new Set();
 
 let project = currentProject(reg);
@@ -66,12 +74,13 @@ async function activate(p) {
   await flow?.close();
   project = p;
   st = state.load(p.id);
+  if (PASSIVE && st.phase === 'onboard') st.phase = 'implement';   // a rehearsal server never onboards
   // seed today's running totals from the log, not from the state file, so a restart never
   // shows stale money and deleting today's log starts the day back at zero
   st.runningTotals = costs.daySeed(state.readLog(p.id));
   st.runningTotalsDay = state.today();
   reg.current = p.id;
-  saveRegistry(reg);
+  if (!PINNED) saveRegistry(reg);
   await pipeline?.stop();
   const office = readOffice(p.path);
   flow = new Flow({ project: p, state: st, team, office, emit: broadcast, approvals, save: saveState });
@@ -81,7 +90,7 @@ async function activate(p) {
   broadcast(projectStatus());
   broadcast(make('flow.phase', { phase: st.phase, feature: st.feature }));
   flow.refreshBoard();
-  maybeStartPipeline();
+  if (!PASSIVE) maybeStartPipeline();
 }
 
 /** The downstream half runs whenever there is a feature with tickets and the flow is past to-tickets. */
@@ -155,6 +164,10 @@ async function onboardWithManager(n) {
 async function handle(msg, ws) {
   const errs = validate(msg);
   if (errs.length) { ws.send(JSON.stringify(make('error', { message: 'bad message: ' + errs.join(', ') }))); return; }
+  if (PASSIVE && ['project.add', 'project.select', 'project.recheck', 'flow.next', 'merge'].includes(msg.type)) {
+    unicast(ws, make('error', { message: `server ซ้อมของ worktree (passive) ไม่รับ ${msg.type}` }));
+    return;
+  }
   switch (msg.type) {
     case 'project.add': {
       try {
@@ -260,8 +273,10 @@ wss.on('connection', (ws) => {
 
 console.info(`${VERSION} listening on ws://localhost:${PORT}/office · team: ${Object.keys(team).join(', ')}`);
 if (project) {
-  console.info(`project: ${project.id} (${project.path}) phase=${st.phase}`);
-  activate(project).then(() => { if (st.phase === 'onboard') onboard(); });
+  activate(project).then(() => {
+    console.info(`project: ${project.id} (${project.path}) phase=${st.phase}${PASSIVE ? ' · passive rehearsal server' : ''}`);
+    if (st.phase === 'onboard' && !PASSIVE) onboard();
+  });
 } else {
   console.info('no project yet: add one from the panel (แท็บ โปรเจกต์) or create server/projects.json');
 }

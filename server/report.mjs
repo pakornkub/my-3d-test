@@ -23,7 +23,7 @@ export function ticketReport(t) {
   const reviewLine = t.review?.byHuman
     ? 'review: มนุษย์รับ diff แทน reviewer หลังการ escalate (finding ที่เหลือเป็นเชิงมาตรฐาน)'
     : t.review
-    ? `review: Standards ${t.review.standards?.length ?? 0} ข้อ${t.review.standards?.length ? ' (' + t.review.standards.join('; ') + ')' : ''} · Spec ${t.review.spec?.length ? t.review.spec.length + ' ข้อ (' + t.review.spec.join('; ') + ')' : 'ครบ'} → ${t.review.verdict === 'pass' ? 'ผ่าน' : 'ไม่ผ่าน'}`
+    ? `review: Standards ${t.review.standards?.length ?? 0} ข้อ${t.review.standards?.length ? ' (' + t.review.standards.join('; ') + ')' : ''} · Spec ${t.review.spec?.length ? t.review.spec.length + ' ข้อ (' + t.review.spec.join('; ') + ')' : 'ครบ'} → ${t.review.verdict === 'pass' ? 'ผ่าน' : 'ไม่ผ่าน'}${t.review.byRule ? ' (reviewer เขียน fail แต่ไม่มี finding เชิง Spec จึงผ่านตามกฎของทีม)' : ''}`
     : 'review: ไม่ได้รีวิว';
   const verifyLine = t.verify
     ? `verify: ${t.verify.criteria.filter((c) => c.pass).length}/${t.verify.criteria.length} ข้อ${t.verify.evidence ? ' · ' + t.verify.evidence : ''} → ${t.verify.verdict === 'pass' ? 'ผ่าน' : 'ไม่ผ่าน'}`
