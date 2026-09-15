@@ -1,9 +1,7 @@
-// state.mjs -- what survives a server restart.
-//
-// One JSON file per project under server/state/<project>.json holding the manager's SDK
-// session id, the active feature, the current phase and the ticket sessions in flight.
-// Small enough to rewrite whole on every change; a database can replace it later without
-// touching callers, which only ever call load()/save().
+// state.mjs -- what survives a server restart: one JSON file per project under
+// server/state/<project>.json, load()/save()'d whole, and the append-only per-day event
+// log (logEvent/readLog) it can be rebuilt from. state.runningTotals is one of its fields;
+// costs.mjs computes what goes into it, index.mjs is the one that assigns and saves it.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +17,8 @@ const EMPTY = () => ({
   phase: 'onboard',
   onboarding: [],          // [{ n, state, detail }]
   jobs: {},                // ticket id -> { agent, sessionId, attempt, status, worktree }
-  costUsd: 0,
+  runningTotals: {},       // session key (`ev.session ?? ev.agent`) -> { agent, usd }, see costs.mjs
+  runningTotalsDay: null,  // the UTC day `runningTotals` is a bucket for, see costs.mjs:recordCost
   updatedAt: null,
 });
 
@@ -40,13 +39,18 @@ function file(projectId) { return path.join(STATE_DIR, `${projectId}.json`); }
 /** Append-only JSONL of every event the server emitted, one file per project per day. */
 export function logEvent(projectId, ev) {
   fs.mkdirSync(LOG_DIR, { recursive: true });
-  const day = new Date(ev.t ?? Date.now()).toISOString().slice(0, 10);
-  fs.appendFileSync(path.join(LOG_DIR, `${projectId}-${day}.jsonl`), JSON.stringify(ev) + '\n');
+  fs.appendFileSync(path.join(LOG_DIR, `${projectId}-${dayOf(ev)}.jsonl`), JSON.stringify(ev) + '\n');
 }
 
-export function readLog(projectId, day = new Date().toISOString().slice(0, 10)) {
+export function readLog(projectId, day = today()) {
   try {
     return fs.readFileSync(path.join(LOG_DIR, `${projectId}-${day}.jsonl`), 'utf8')
       .split('\n').filter(Boolean).map((l) => JSON.parse(l));
   } catch { return []; }
 }
+
+/** The UTC day string the log is filed by (ADR-0002: the boundary is the log's own, not local time). */
+export function today() { return new Date().toISOString().slice(0, 10); }
+
+/** The UTC day one event's own timestamp falls on. */
+export function dayOf(ev) { return new Date(ev?.t ?? Date.now()).toISOString().slice(0, 10); }

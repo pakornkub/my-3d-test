@@ -4,6 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Flow } from '../server/flow.mjs';
+import { daySeed } from '../server/costs.mjs';
+import { writeOffice, DEFAULTS } from '../server/office.mjs';
+
+const setDailyBudget = (repo, usd) =>
+  writeOffice(repo, { ...DEFAULTS, policy: { ...DEFAULTS.policy, 'daily-budget-usd': String(usd) } });
 
 // an empty repo per test: a real .scratch/ would start an fs.watch and keep the runner alive
 const emptyRepo = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ube-flow-'));
@@ -23,7 +28,7 @@ function fakeSession(script = {}) {
 function setup({ phase = 'implement', feature = null, commands } = {}) {
   const events = [];
   const s = fakeSession({ commands });
-  const state = { phase, feature, managerSessionId: null, costUsd: 0 };
+  const state = { phase, feature, managerSessionId: null, runningTotals: {} };
   const flow = new Flow({
     project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
     state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
@@ -81,9 +86,64 @@ test('next: spec then tickets advance the phase in order and refuse to go backwa
   assert.ok(s.sent.length >= n);
 });
 
+test('the manager session is seeded from its own prior running total, filed under the plain agent id before any session id is known (legacy, ADR-0001)', async () => {
+  const s = fakeSession();
+  let seenSeed;
+  const state = { phase: 'implement', feature: null, managerSessionId: null, runningTotals: { manager: { agent: 'manager', usd: 2 } } };
+  const flow = new Flow({
+    project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
+    state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
+    office: null, emit: () => {}, approvals: null, save: () => {},
+    createSession: (opts) => { seenSeed = opts.costSeed; return s; },
+  });
+  await flow.onCommand('อยากได้ X');
+  assert.equal(seenSeed, 2);          // the restart-safe seed reached the new session
+});
+
+test('the seed is still found once a session.cost event carries `session` (ADR-0002), not just by the literal agent id', async () => {
+  // stands in for a boot-time reseed from a log written after the runner starts tagging
+  // session.cost events with `session` -- the manager's entry moves off the 'manager' key
+  // onto its SDK session id, and the seed lookup must follow it there. Building the fixture
+  // through the real day-seed function (rather than a hand-rolled { 'sess-1': {...} }
+  // literal) keeps this test honest about daySeed's actual output shape.
+  const s = fakeSession();
+  let seenSeed;
+  const state = {
+    phase: 'implement', feature: null, managerSessionId: 'sess-1',
+    runningTotals: daySeed([{ v: 1, t: Date.now(), type: 'session.cost', agent: 'manager', session: 'sess-1', usd: 7 }]),
+  };
+  const flow = new Flow({
+    project: { id: 'p', path: emptyRepo(), mainBranch: 'main' },
+    state, team: { manager: { prompt: 'คุณคือผู้จัดการ', model: 'claude-opus-5', tools: [] } },
+    office: null, emit: () => {}, approvals: null, save: () => {},
+    createSession: (opts) => { seenSeed = opts.costSeed; return s; },
+  });
+  await flow.onCommand('อยากได้ X');
+  assert.equal(seenSeed, 7);          // NOT 0 -- this is the restart AC the ticket exists for
+});
+
 test('a message during onboarding is refused without touching the session', async () => {
   const { flow, s, events } = setup({ phase: 'onboard' });
   await flow.onCommand('hi');
   assert.equal(s.sent.length, 0);
   assert.match(events.at(-1).text, /onboarding/);
+});
+
+test('snapshot carries daily-budget-usd from the office file on disk', () => {
+  const { flow } = setup();
+  setDailyBudget(flow.repo, 5);
+  assert.equal(flow.snapshot().dailyBudgetUsd, 5);
+});
+
+test('snapshot has no budget when the repo has no office file', () => {
+  const { flow } = setup();
+  assert.equal(flow.snapshot().dailyBudgetUsd, undefined);
+});
+
+test('editing daily-budget-usd on disk changes the next snapshot without reconstructing Flow', () => {
+  const { flow } = setup();
+  setDailyBudget(flow.repo, 5);
+  assert.equal(flow.snapshot().dailyBudgetUsd, 5);
+  setDailyBudget(flow.repo, 8);
+  assert.equal(flow.snapshot().dailyBudgetUsd, 8);
 });

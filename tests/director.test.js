@@ -132,3 +132,84 @@ test('flow.phase done returns everyone to their spawn point and the manager to t
   assert.deepEqual(crew.calls.find(([k, id]) => k === 'seat' && id === 'manager'), ['seat', 'manager', HOME_SEAT.manager]);
   assert.ok(Object.values(d.status).every((s) => s.state === 'idle'));
 });
+
+// ---------------------------------------------------------------- money
+test('a cost event replaces the running total for its session, it does not accumulate', () => {
+  const { d } = setup();
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 0.42 }));
+  assert.equal(d.memberCost('eng_m1'), 0.42);
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 0.90 }));
+  assert.equal(d.memberCost('eng_m1'), 0.90);
+});
+
+test('member cost sums the latest running totals across two sessions of one member', () => {
+  const { d } = setup();
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 0.90 }));
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's2', usd: 0.10 }));
+  assert.equal(d.memberCost('eng_m1'), 1.00);
+});
+
+test('a cost event for an agent id off the roster changes no member figure and does not throw', () => {
+  const { d } = setup();
+  assert.doesNotThrow(() => d.handle(make('session.cost', { agent: 'someone_else', session: 's9', usd: 5 })));
+  assert.equal(d.memberCost('someone_else'), 5);
+  for (const id of IDS) assert.equal(d.memberCost(id), undefined);
+});
+
+test('members who have received no cost event have no member figure', () => {
+  const { d } = setup();
+  assert.equal(d.memberCost('eng_f1'), undefined);
+});
+
+test('a cost event on a new UTC day starts a fresh bucket and discards the old one', () => {
+  const { d } = setup();
+  const day1 = Date.UTC(2026, 0, 1, 12);
+  const day2 = Date.UTC(2026, 0, 2, 1);
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 3, t: day1 }));
+  assert.equal(d.memberCost('eng_m1'), 3);
+  d.handle(make('session.cost', { agent: 'eng_f1', session: 's2', usd: 1, t: day2 }));
+  assert.equal(d.memberCost('eng_m1'), undefined);
+  assert.equal(d.memberCost('eng_f1'), 1);
+});
+
+test('a legacy cost event with no session field is still accounted, keyed on the agent id', () => {
+  const { d } = setup();
+  d.handle(make('session.cost', { agent: 'eng_m1', usd: 0.25 }));
+  assert.equal(d.memberCost('eng_m1'), 0.25);
+});
+
+test('team cost is zero before any cost event', () => {
+  const { d } = setup();
+  assert.equal(d.teamCost(), 0);
+});
+
+test('team cost sums every session today, including an id off the roster', () => {
+  const { d } = setup();
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 0.42 }));
+  d.handle(make('session.cost', { agent: 'someone_else', session: 's9', usd: 5 }));
+  assert.equal(d.teamCost(), 5.42);
+});
+
+test('breakdown lists every agent id that has spent money, summed across its sessions', () => {
+  const { d } = setup();
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 0.9 }));
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's2', usd: 0.1 }));
+  d.handle(make('session.cost', { agent: 'someone_else', session: 's9', usd: 5 }));
+  assert.deepEqual(d.breakdown(), { eng_m1: 1, someone_else: 5 });
+});
+
+test('setBudget stores the budget and republishes the team figure to the panel', () => {
+  const { d, panel } = setup();
+  d.setBudget(10);
+  assert.equal(d.budget, 10);
+  const call = panel.calls.find(([k]) => k === 'cost');
+  assert.deepEqual(call, ['cost', { team: 0, budget: 10, breakdown: {} }]);
+});
+
+test('a session.cost event republishes team, budget and breakdown to the panel', () => {
+  const { d, panel } = setup();
+  d.setBudget(10);
+  d.handle(make('session.cost', { agent: 'eng_m1', session: 's1', usd: 1.5 }));
+  const call = panel.calls.filter(([k]) => k === 'cost').at(-1);
+  assert.deepEqual(call, ['cost', { team: 1.5, budget: 10, breakdown: { eng_m1: 1.5 } }]);
+});

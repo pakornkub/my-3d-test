@@ -85,6 +85,15 @@ export function guessCommands(repo) {
   return c;
 }
 
+/**
+ * daily-budget-usd as a number; undefined when the repo has no office file. One number, two
+ * uses (CONTEXT.md): the session's hard cap (ensureManager) and the panel's display
+ * denominator (Flow#snapshot) both read it here instead of each parsing the policy string.
+ */
+export function dailyBudgetUsd(office) {
+  return office ? Number(office.policy['daily-budget-usd']) : undefined;
+}
+
 /** Split "npm, npx prisma, git status" into prefix rules; a command is allowed when it starts with one. */
 export function allowlistRules(policy) {
   return (policy['bash-allowlist'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);

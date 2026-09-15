@@ -1,0 +1,263 @@
+
+> ube-office@0.1.0 test
+> node --test "tests/**/*.test.js"
+
+TAP version 13
+# [director] dropped malformed event agent.start [
+#   'v: expected 1, got undefined',
+#   't: missing',
+#   'agent: missing',
+#   'ticket: missing',
+#   'brief: missing'
+# ]
+# Subtest: malformed events are dropped, not thrown
+ok 1 - malformed events are dropped, not thrown
+  ---
+  duration_ms: 1.6315
+  ...
+# Subtest: grill phase sends the manager to the meeting table
+ok 2 - grill phase sends the manager to the meeting table
+  ---
+  duration_ms: 0.3514
+  ...
+# Subtest: agent.start puts an implementer on their own chair, QA at the TV, reviewer at their desk
+ok 3 - agent.start puts an implementer on their own chair, QA at the TV, reviewer at their desk
+  ---
+  duration_ms: 0.3359
+  ...
+# Subtest: agent.ask makes the person stand by their desk and wait; answered() sits them back down
+ok 4 - agent.ask makes the person stand by their desk and wait; answered() sits them back down
+  ---
+  duration_ms: 0.3352
+  ...
+# Subtest: agent.done walks to the manager desk; ticket.closed sends everyone on that ticket home
+ok 5 - agent.done walks to the manager desk; ticket.closed sends everyone on that ticket home
+  ---
+  duration_ms: 0.4773
+  ...
+# Subtest: a failed review sends the implementer back to their chair
+ok 6 - a failed review sends the implementer back to their chair
+  ---
+  duration_ms: 0.187
+  ...
+# Subtest: escalation frees the assignee and the manager carries the warning
+ok 7 - escalation frees the assignee and the manager carries the warning
+  ---
+  duration_ms: 0.7179
+  ...
+# Subtest: feature.report: manager to the TV, everyone else gathers at the meeting table
+ok 8 - feature.report: manager to the TV, everyone else gathers at the meeting table
+  ---
+  duration_ms: 0.3412
+  ...
+# Subtest: flow.phase done returns everyone to their spawn point and the manager to their chair
+ok 9 - flow.phase done returns everyone to their spawn point and the manager to their chair
+  ---
+  duration_ms: 0.3373
+  ...
+# Subtest: make() stamps version, time and type
+ok 10 - make() stamps version, time and type
+  ---
+  duration_ms: 1.0729
+  ...
+# Subtest: validate() rejects a missing required field
+ok 11 - validate() rejects a missing required field
+  ---
+  duration_ms: 0.2751
+  ...
+# Subtest: validate() rejects an unknown type and a wrong version
+ok 12 - validate() rejects an unknown type and a wrong version
+  ---
+  duration_ms: 0.2001
+  ...
+# Subtest: validate() checks phases and ticket statuses
+ok 13 - validate() checks phases and ticket statuses
+  ---
+  duration_ms: 0.1449
+  ...
+# Subtest: every schema entry can be built with its required fields
+ok 14 - every schema entry can be built with its required fields
+  ---
+  duration_ms: 0.4612
+  ...
+# Subtest: frontier() = ready, unclaimed, and every blocker done
+ok 15 - frontier() = ready, unclaimed, and every blocker done
+  ---
+  duration_ms: 0.2179
+  ...
+# [flow] skill grill-with-docs: not registered by the CLI, inlining SKILL.md
+# [flow] skill grill-with-docs: registered as /mattpocock-skills:grill-with-docs
+# [flow] stale answer y
+# [flow] skill to-spec: not registered by the CLI, inlining SKILL.md
+# [flow] skill to-tickets: not registered by the CLI, inlining SKILL.md
+# [flow] skill grill-with-docs: not registered by the CLI, inlining SKILL.md
+# [flow] skill to-spec: not registered by the CLI, inlining SKILL.md
+# [flow] skill grill-with-docs: not registered by the CLI, inlining SKILL.md
+# [flow] skill grill-with-docs: not registered by the CLI, inlining SKILL.md
+# [flow] skill grill-with-docs: not registered by the CLI, inlining SKILL.md
+# Subtest: an idea while idle starts the interview: phase grill, grill skill sent, question surfaced as flow.ask
+ok 16 - an idea while idle starts the interview: phase grill, grill skill sent, question surfaced as flow.ask
+  ---
+  duration_ms: 2.6599
+  ...
+# Subtest: a registered slash command is preferred over inlining the skill body
+ok 17 - a registered slash command is preferred over inlining the skill body
+  ---
+  duration_ms: 0.6596
+  ...
+# Subtest: answering a flow.ask sends the text back as the next turn; an empty answer becomes an OK
+ok 18 - answering a flow.ask sends the text back as the next turn; an empty answer becomes an OK
+  ---
+  duration_ms: 0.8572
+  ...
+# Subtest: next: spec then tickets advance the phase in order and refuse to go backwards
+ok 19 - next: spec then tickets advance the phase in order and refuse to go backwards
+  ---
+  duration_ms: 2.4849
+  ...
+# Subtest: the manager session is seeded from its own prior running total, filed under the plain agent id before any session id is known (legacy, ADR-0001)
+ok 20 - the manager session is seeded from its own prior running total, filed under the plain agent id before any session id is known (legacy, ADR-0001)
+  ---
+  duration_ms: 1.0801
+  ...
+# Subtest: the seed is still found once a session.cost event carries `session` (ADR-0002), not just by the literal agent id
+ok 21 - the seed is still found once a session.cost event carries `session` (ADR-0002), not just by the literal agent id
+  ---
+  duration_ms: 1.032
+  ...
+# Subtest: a message during onboarding is refused without touching the session
+ok 22 - a message during onboarding is refused without touching the session
+  ---
+  duration_ms: 0.2073
+  ...
+# Subtest: parseImplementResult reads RESULT/EVIDENCE/NEXT and the summary bullets
+ok 23 - parseImplementResult reads RESULT/EVIDENCE/NEXT and the summary bullets
+  ---
+  duration_ms: 1.2732
+  ...
+# Subtest: parseReviewResult splits finding lists and treats none as empty
+ok 24 - parseReviewResult splits finding lists and treats none as empty
+  ---
+  duration_ms: 0.3731
+  ...
+# Subtest: parseVerifyResult maps CRITERION lines onto the ticket criteria in order
+ok 25 - parseVerifyResult maps CRITERION lines onto the ticket criteria in order
+  ---
+  duration_ms: 0.5754
+  ...
+# Subtest: pickImplementer prefers the specialty that matches the ticket text
+ok 26 - pickImplementer prefers the specialty that matches the ticket text
+  ---
+  duration_ms: 0.3579
+  ...
+# Subtest: ticketReport follows the level-1 template and validateReport accepts it
+ok 27 - ticketReport follows the level-1 template and validateReport accepts it
+  ---
+  duration_ms: 0.4519
+  ...
+# warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+# Subtest: runGates runs only the commands that exist and reports pass/fail with output
+ok 28 - runGates runs only the commands that exist and reports pass/fail with output
+  ---
+  duration_ms: 5174.2802
+  ...
+# Subtest: ticket worktrees branch from the feature branch, merge back, and rebase the others
+ok 29 - ticket worktrees branch from the feature branch, merge back, and rebase the others
+  ---
+  duration_ms: 560.452
+  ...
+# Subtest: parseAgentFile reads frontmatter lists and scalars, body becomes the prompt
+ok 30 - parseAgentFile reads frontmatter lists and scalars, body becomes the prompt
+  ---
+  duration_ms: 1.157
+  ...
+# Subtest: the shipped team folder loads: six ids, manager excluded from agent definitions
+ok 31 - the shipped team folder loads: six ids, manager excluded from agent definitions
+  ---
+  duration_ms: 3.9202
+  ...
+# Subtest: parseTicket extracts id, title, blockers, status, criteria
+ok 32 - parseTicket extracts id, title, blockers, status, criteria
+  ---
+  duration_ms: 1.0941
+  ...
+# Subtest: readBoard derives blocked from unfinished blockers; claimTicket rewrites status and assignee
+ok 33 - readBoard derives blocked from unfinished blockers; claimTicket rewrites status and assignee
+  ---
+  duration_ms: 8.552
+  ...
+# Subtest: office.md round-trips and the allowlist blocks chained and pushing commands
+ok 34 - office.md round-trips and the allowlist blocks chained and pushing commands
+  ---
+  duration_ms: 0.8166
+  ...
+# Subtest: daySeed keys by session id, not by agent: two sessions of one agent stay separate
+ok 35 - daySeed keys by session id, not by agent: two sessions of one agent stay separate
+  ---
+  duration_ms: 0.2487
+  ...
+# Subtest: daySeed keeps the latest running total per session key, not a sum
+ok 36 - daySeed keeps the latest running total per session key, not a sum
+  ---
+  duration_ms: 0.1032
+  ...
+# Subtest: daySeed skips malformed entries instead of throwing
+ok 37 - daySeed skips malformed entries instead of throwing
+  ---
+  duration_ms: 0.1369
+  ...
+# Subtest: daySeed of an empty log is an empty map
+ok 38 - daySeed of an empty log is an empty map
+  ---
+  duration_ms: 0.1822
+  ...
+# Subtest: runningTotalFor finds a legacy agent-keyed entry even when a session id is already known
+ok 39 - runningTotalFor finds a legacy agent-keyed entry even when a session id is already known
+  ---
+  duration_ms: 0.3
+  ...
+# Subtest: runningTotalFor prefers the session-keyed entry once session.cost events carry `session` (ADR-0002)
+ok 40 - runningTotalFor prefers the session-keyed entry once session.cost events carry `session` (ADR-0002)
+  ---
+  duration_ms: 0.1235
+  ...
+# Subtest: runningTotalFor is 0 for an agent with nothing logged
+ok 41 - runningTotalFor is 0 for an agent with nothing logged
+  ---
+  duration_ms: 0.0491
+  ...
+# Subtest: managerRunningTotal is the one lookup flow.mjs and pipeline.mjs both defer to, so they cannot drift apart
+ok 42 - managerRunningTotal is the one lookup flow.mjs and pipeline.mjs both defer to, so they cannot drift apart
+  ---
+  duration_ms: 0.0651
+  ...
+# Subtest: recordCost starts a fresh bucket the moment an event lands on a new UTC day, discarding the old one (ADR-0002)
+ok 43 - recordCost starts a fresh bucket the moment an event lands on a new UTC day, discarding the old one (ADR-0002)
+  ---
+  duration_ms: 0.5684
+  ...
+# Subtest: recordCost folds into the same bucket for events on the day it already holds
+ok 44 - recordCost folds into the same bucket for events on the day it already holds
+  ---
+  duration_ms: 0.1149
+  ...
+# Subtest: summarizeTool gives a short human line per tool
+ok 45 - summarizeTool gives a short human line per tool
+  ---
+  duration_ms: 0.1746
+  ...
+# [flow] skill to-spec: not registered by the CLI, inlining SKILL.md (session not started yet: no command list to check)
+# Subtest: readSkillBody finds the plugin SKILL.md on disk and strips its frontmatter
+ok 46 - readSkillBody finds the plugin SKILL.md on disk and strips its frontmatter
+  ---
+  duration_ms: 6.9202
+  ...
+1..46
+# tests 46
+# suites 0
+# pass 46
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5903.7195

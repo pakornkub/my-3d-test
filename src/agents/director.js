@@ -30,7 +30,40 @@ export class Director {
     this.tickets = [];
     this.pendingAsks = new Map();   // askId -> agent id, so answers can clear the right person
     this.log = [];
+    this.budget = undefined;        // daily-budget-usd from the connection snapshot; undefined when unknown
     for (const m of crew.members) this.#set(m.id, 'idle');
+  }
+
+  #sessions = new Map();   // session key (session ?? agent) -> { agent, usd }, this UTC day
+  #costDay = null;         // UTC day (ms / 86_400_000) of the current bucket
+
+  /** Every agent id that has spent money today, summed across its sessions -- roster or not. */
+  breakdown() {
+    const out = {};
+    for (const { agent, usd } of this.#sessions.values()) out[agent] = (out[agent] ?? 0) + usd;
+    return out;
+  }
+
+  /** Member cost: the sum of the latest running totals of `id`'s sessions this UTC day. */
+  memberCost(id) {
+    return this.breakdown()[id];
+  }
+
+  /** Team cost: the sum of the latest running totals of every session today, roster or not. */
+  teamCost() {
+    return Object.values(this.breakdown()).reduce((a, b) => a + b, 0);
+  }
+
+  /** The daily-budget-usd from the connection snapshot; republishes the team figure right away. */
+  setBudget(usd) {
+    this.budget = usd;
+    this.#publishCost();
+  }
+
+  #publishCost() {
+    const breakdown = this.breakdown();
+    const team = Object.values(breakdown).reduce((a, b) => a + b, 0);
+    this.panel.cost?.({ team, budget: this.budget, breakdown });
   }
 
   // ---------------------------------------------------------------- helpers
@@ -306,7 +339,14 @@ export class Director {
     this.panel.tv?.({ title: `รายงานปิดงาน: ${ev.feature}`, markdown: ev.report, merge: { branch: `feature/${ev.feature}`, mainBranch: ev.mainBranch ?? 'main' } });
   }
 
-  on_session_cost(ev) { this.panel.cost?.(ev); }
+  on_session_cost(ev) {
+    const day = Math.floor(ev.t / 86_400_000);
+    if (this.#costDay !== null && day !== this.#costDay) this.#sessions.clear();
+    this.#costDay = day;
+    this.#sessions.set(ev.session ?? ev.agent, { agent: ev.agent, usd: ev.usd });
+    this.#publishCost();
+    this.onStatus();
+  }
 
   on_ci_status(ev) {
     this.panel.transcript?.({ agent: 'manager', kind: ev.state === 'success' ? 'done' : 'warn', text: `CI ${ev.state}: ${ev.pr}` });
