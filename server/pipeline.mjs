@@ -148,6 +148,14 @@ class Mutex {
 
 // ---------------------------------------------------------------- the pipeline
 export class Pipeline {
+  /**
+   * @param approvals  **required** -- an Approvals (permissions.mjs). Every session #session()
+   *   builds gets its `canUseTool` from it, so there is no "no approvals" mode: leaving it out
+   *   would hand the SDK its own permission flow behind the team's back, and the rule of this
+   *   server is that an unanswered ask is a deny, never a silent allow. index.mjs always passes one.
+   * @param createSession  seam for tests: (opts) => Session-shaped object.
+   * @param tickMs  how often idle implementers are offered the frontier.
+   */
   constructor({ project, state, team, office, emit, approvals, save, manager, createSession = (o) => new Session(o), tickMs = 15_000 }) {
     this.project = project;
     this.state = state;
@@ -193,6 +201,8 @@ export class Pipeline {
    * @param stage  where to resume: 'implement' | 'review' | 'verify'. Default: review when the
    *               work is committed. 'verify' means the human accepted the diff in place of the
    *               reviewer, so the review step is skipped once and recorded as such.
+   *               ('gates' is the fourth value `resumeStage` can hold, but only pauseFor writes
+   *               it -- a usage limit parked mid fix-loop -- never a human through requeue.)
    */
   requeue(id, stage = null) {
     const t = this.board().find((x) => x.id === id);
@@ -275,7 +285,7 @@ export class Pipeline {
     const maxAttempts = num(this.policy.attempts, 2);
     if (st.attempt > maxAttempts) { this.#escalate(t, `เกิน ${maxAttempts} รอบ`); return; }
     const note = st.resume ?? st.retryNote ?? null;
-    const startAt = st.resumeStage ?? 'implement';     // 'review' / 'verify': skip straight to the fix loop
+    const startAt = st.resumeStage ?? 'implement';     // 'gates' / 'review' / 'verify': skip straight to the fix loop
     delete st.resume; delete st.retryNote; delete st.resumeStage;
     st.stage = startAt;
     this.save();
@@ -454,33 +464,38 @@ export class Pipeline {
     return this.locks[REVIEWER].run(async () => {
       this.emit(make('agent.start', { agent: REVIEWER, ticket: t.id, brief: `รีวิว diff ใบ ${t.id}`, mode: 'review' }));
       const s = this.#session(REVIEWER, { cwd: w.path, ticket: t.id, role: 'review' });
-      s.start();
-      const prompt = [
-        this.#skill('code-review'),
-        '',
-        `fixed point: ${w.feature} (git diff ${w.feature}...HEAD)`,
-        `spec: .scratch/${this.feature}/spec.md · ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')}`,
-        'มาตรฐานของ repo: CLAUDE.md, CONTEXT.md, docs/adr/',
-        'ห้ามแก้โค้ด รายงานอย่างเดียว ถ้าแตกงานให้ sub-agent ให้รอผลก่อนตอบ (ห้ามใช้ background agent) แล้วจบด้วยสามบรรทัด VERDICT / STANDARDS / SPEC ตาม prompt ประจำตัวของคุณ',
-      ].join('\n');
-      await s.send(prompt);
-      // the review skill fans out to sub-agents; if the reviewer ended its turn while they were
-      // still running, their results land as later assistant messages in the same session, so
-      // wait for a verdict line before judging, then ask for it once
-      const hasVerdict = () => /VERDICT:/i.test(s.lastText);
-      const waitFor = async (ms) => { const t0 = Date.now(); while (!hasVerdict() && !s.limited && !s.closed && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 10_000)); };
-      if (!hasVerdict() && !s.limited) await waitFor(8 * 60_000);
-      if (!hasVerdict() && !s.limited) {
-        await s.send('รวมผลจาก sub-agent ทั้งสองแกน (รอให้เสร็จ ห้ามจบ turn ก่อน) แล้วจบด้วยสามบรรทัดเท่านั้น: VERDICT: pass|fail / STANDARDS: … หรือ none / SPEC: … หรือ none');
-        if (!hasVerdict() && !s.limited) await waitFor(6 * 60_000);
+      // the session is closed in a finally: a throw here (SDK error, a prompt that cannot be
+      // built) must not leave a live session behind for the rest of the server's life
+      try {
+        s.start();
+        const prompt = [
+          this.#skill('code-review'),
+          '',
+          `fixed point: ${w.feature} (git diff ${w.feature}...HEAD)`,
+          `spec: .scratch/${this.feature}/spec.md · ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')}`,
+          'มาตรฐานของ repo: CLAUDE.md, CONTEXT.md, docs/adr/',
+          'ห้ามแก้โค้ด รายงานอย่างเดียว ถ้าแตกงานให้ sub-agent ให้รอผลก่อนตอบ (ห้ามใช้ background agent) แล้วจบด้วยสามบรรทัด VERDICT / STANDARDS / SPEC ตาม prompt ประจำตัวของคุณ',
+        ].join('\n');
+        await s.send(prompt);
+        // the review skill fans out to sub-agents; if the reviewer ended its turn while they were
+        // still running, their results land as later assistant messages in the same session, so
+        // wait for a verdict line before judging, then ask for it once
+        const hasVerdict = () => /VERDICT:/i.test(s.lastText);
+        const waitFor = async (ms) => { const t0 = Date.now(); while (!hasVerdict() && !s.limited && !s.closed && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 10_000)); };
+        if (!hasVerdict() && !s.limited) await waitFor(8 * 60_000);
+        if (!hasVerdict() && !s.limited) {
+          await s.send('รวมผลจาก sub-agent ทั้งสองแกน (รอให้เสร็จ ห้ามจบ turn ก่อน) แล้วจบด้วยสามบรรทัดเท่านั้น: VERDICT: pass|fail / STANDARDS: … หรือ none / SPEC: … หรือ none');
+          if (!hasVerdict() && !s.limited) await waitFor(6 * 60_000);
+        }
+        const r = /VERDICT:/i.test(s.lastText) ? parseReviewResult(s.lastText) : { verdict: 'fail', standards: [], spec: ['reviewer ไม่ได้ให้ verdict: ' + tail(s.lastText, 200)] };
+        r.usd = s.costUsd;
+        r.limited = !!s.limited;
+        if (r.limited) return r;
+        this.emit(make('review.result', { agent: REVIEWER, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, standards: r.standards, spec: r.spec, verdict: r.verdict, ...(r.byRule ? { byRule: true } : {}) }));
+        return r;
+      } finally {
+        s.close();
       }
-      const r = /VERDICT:/i.test(s.lastText) ? parseReviewResult(s.lastText) : { verdict: 'fail', standards: [], spec: ['reviewer ไม่ได้ให้ verdict: ' + tail(s.lastText, 200)] };
-      r.usd = s.costUsd;
-      r.limited = !!s.limited;
-      s.close();
-      if (r.limited) return r;
-      this.emit(make('review.result', { agent: REVIEWER, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, standards: r.standards, spec: r.spec, verdict: r.verdict, ...(r.byRule ? { byRule: true } : {}) }));
-      return r;
     });
   }
 
@@ -488,52 +503,57 @@ export class Pipeline {
     return this.locks[QA].run(async () => {
       this.emit(make('agent.start', { agent: QA, ticket: t.id, brief: `ตรวจรับใบ ${t.id} (${t.criteria.length} ข้อ)`, mode: 'verify' }));
       const exploratory = this.policy.verify === 'exploratory';
-      let dev = null, office = null;
-      if (exploratory && this.commands.dev) {
-        const base = num(this.office?.worktree?.['port-base'], 3100), n = this.slot++ % 40;
-        const port = base + 1 + n, officePort = base + 41 + n;
-        // the worktree's own Office Server (passive, pinned to the worktree) first, so the dev
-        // server's /office proxy reaches the diff's server code instead of the shared one on :5181
-        if (this.commands.office) {
-          office = await wt.startOfficeServer(this.commands.office, w.path, officePort);
-          if (!office) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `Office Server ของ worktree ไม่ขึ้นที่ :${officePort} ข้อที่ต้องใช้ server ของ diff นี้จะถูก skip` }));
+      let dev = null, office = null, s = null;
+      // whatever happens below, the two child servers and the session are torn down: a throw
+      // here used to leave them holding their ports until the whole server exited
+      try {
+        if (exploratory && this.commands.dev) {
+          const base = num(this.office?.worktree?.['port-base'], 3100), n = this.slot++ % 40;
+          const port = base + 1 + n, officePort = base + 41 + n;
+          // the worktree's own Office Server (passive, pinned to the worktree) first, so the dev
+          // server's /office proxy reaches the diff's server code instead of the shared one on :5181
+          if (this.commands.office) {
+            office = await wt.startOfficeServer(this.commands.office, w.path, officePort);
+            if (!office) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `Office Server ของ worktree ไม่ขึ้นที่ :${officePort} ข้อที่ต้องใช้ server ของ diff นี้จะถูก skip` }));
+          }
+          dev = await wt.startDevServer(this.commands.dev, w.path, port, 40_000, office ? { OFFICE_PORT: String(officePort) } : {});
+          if (!dev) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `dev server ไม่ขึ้นที่ :${port} ตรวจได้เฉพาะแบบ scripted` }));
         }
-        dev = await wt.startDevServer(this.commands.dev, w.path, port, 40_000, office ? { OFFICE_PORT: String(officePort) } : {});
-        if (!dev) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `dev server ไม่ขึ้นที่ :${port} ตรวจได้เฉพาะแบบ scripted` }));
+        const browser = qaBrowser();
+        if (exploratory && !browser) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: 'ไม่พบเบราว์เซอร์สำหรับ Playwright (chromium/chrome/msedge) ตรวจได้เฉพาะแบบ scripted' }));
+        const mcp = exploratory && browser ? { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless', '--browser', browser] } } : undefined;
+        s = this.#session(QA, { cwd: w.path, ticket: t.id, role: 'qa', mcp });
+        s.start();
+        const criteria = t.criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
+        const prompt = [
+          `ตรวจรับใบ ${t.id}: ${t.title}`,
+          `ไฟล์ ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')} · spec: .scratch/${this.feature}/spec.md`,
+          `โหมด: ${this.policy.verify}` + (dev ? ` · หน้าเว็บของ worktree นี้เปิดอยู่ที่ ${dev.url} (ใช้เครื่องมือ playwright: navigate, click, evaluate, screenshot)` : ''),
+          `คำสั่งที่รันได้: ${Object.entries(this.commands).filter(([k, v]) => v && k !== 'office').map(([k, v]) => `${k}: ${v}`).join(' · ')}`,
+          '',
+          'Acceptance criteria:',
+          criteria,
+          '',
+          'ทำทีละข้อ เก็บหลักฐานลง .scratch/' + this.feature + '/issues/' + t.id + '/verify/ (สร้างโฟลเดอร์ได้)',
+          'ข้อที่ต้องใช้เบราว์เซอร์แต่ไม่มีเบราว์เซอร์ให้ตอบ skip พร้อมเหตุผล ไม่ใช่ fail',
+          office
+            ? `Office Server ของ worktree นี้ (รันโค้ดของ diff นี้) เปิดอยู่ที่ ${office.url} แบบ passive: ผูกโปรเจกต์นี้ไว้แล้ว ไม่ทำ onboarding ไม่รัน pipeline และหน้าเว็บที่ ${dev?.url ?? '(dev server ไม่ขึ้น)'} เชื่อมกับ server นี้อยู่แล้ว ข้อที่ต้องให้ manager คุยกับ Claude จริง หรือต้องหยุด/รีสตาร์ต server ให้ตอบ skip พร้อมเหตุผล ห้ามแตะ server กลางที่ ws://localhost:5181`
+            : 'Office Server ที่ ws://localhost:5181 รันโค้ดของ branch หลัก ไม่ใช่ของ worktree นี้: ข้อที่ต้องให้ server ส่งข้อมูลใหม่จาก diff นี้ (เช่น field ใหม่ใน hello/snapshot) หรือต้องหยุด server นั้น ให้ตอบ skip พร้อมเหตุผล ห้ามนับเป็น fail และห้ามหยุดหรือรบกวน server ที่ใช้ร่วมกัน',
+          'อย่าแก้ไฟล์ของโปรเจกต์เพื่อทดสอบ ถ้าข้อไหนต้องแก้ไฟล์นอก .scratch ให้ตอบ skip',
+          'จบด้วยบรรทัดต่อข้อ "CRITERION n: pass|fail|skip — หลักฐานสั้นๆ" แล้วตามด้วย VERDICT / CRITERIA / REPRO (VERDICT เป็น fail เมื่อมีข้อใด fail)',
+        ].join('\n');
+        await s.send(prompt);
+        const r = parseVerifyResult(s.lastText, t.criteria);
+        r.usd = s.costUsd;
+        r.limited = !!s.limited;
+        if (r.limited) return r;
+        this.emit(make('verify.result', { agent: QA, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, criteria: r.criteria, verdict: r.verdict, repro: r.repro }));
+        return r;
+      } finally {
+        s?.close();
+        dev?.stop();
+        office?.stop();
       }
-      const browser = qaBrowser();
-      if (exploratory && !browser) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: 'ไม่พบเบราว์เซอร์สำหรับ Playwright (chromium/chrome/msedge) ตรวจได้เฉพาะแบบ scripted' }));
-      const mcp = exploratory && browser ? { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless', '--browser', browser] } } : undefined;
-      const s = this.#session(QA, { cwd: w.path, ticket: t.id, role: 'qa', mcp });
-      s.start();
-      const criteria = t.criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
-      const prompt = [
-        `ตรวจรับใบ ${t.id}: ${t.title}`,
-        `ไฟล์ ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')} · spec: .scratch/${this.feature}/spec.md`,
-        `โหมด: ${this.policy.verify}` + (dev ? ` · หน้าเว็บของ worktree นี้เปิดอยู่ที่ ${dev.url} (ใช้เครื่องมือ playwright: navigate, click, evaluate, screenshot)` : ''),
-        `คำสั่งที่รันได้: ${Object.entries(this.commands).filter(([k, v]) => v && k !== 'office').map(([k, v]) => `${k}: ${v}`).join(' · ')}`,
-        '',
-        'Acceptance criteria:',
-        criteria,
-        '',
-        'ทำทีละข้อ เก็บหลักฐานลง .scratch/' + this.feature + '/issues/' + t.id + '/verify/ (สร้างโฟลเดอร์ได้)',
-        'ข้อที่ต้องใช้เบราว์เซอร์แต่ไม่มีเบราว์เซอร์ให้ตอบ skip พร้อมเหตุผล ไม่ใช่ fail',
-        office
-          ? `Office Server ของ worktree นี้ (รันโค้ดของ diff นี้) เปิดอยู่ที่ ${office.url} แบบ passive: ผูกโปรเจกต์นี้ไว้แล้ว ไม่ทำ onboarding ไม่รัน pipeline และหน้าเว็บที่ ${dev?.url ?? '(dev server ไม่ขึ้น)'} เชื่อมกับ server นี้อยู่แล้ว ข้อที่ต้องให้ manager คุยกับ Claude จริง หรือต้องหยุด/รีสตาร์ต server ให้ตอบ skip พร้อมเหตุผล ห้ามแตะ server กลางที่ ws://localhost:5181`
-          : 'Office Server ที่ ws://localhost:5181 รันโค้ดของ branch หลัก ไม่ใช่ของ worktree นี้: ข้อที่ต้องให้ server ส่งข้อมูลใหม่จาก diff นี้ (เช่น field ใหม่ใน hello/snapshot) หรือต้องหยุด server นั้น ให้ตอบ skip พร้อมเหตุผล ห้ามนับเป็น fail และห้ามหยุดหรือรบกวน server ที่ใช้ร่วมกัน',
-        'อย่าแก้ไฟล์ของโปรเจกต์เพื่อทดสอบ ถ้าข้อไหนต้องแก้ไฟล์นอก .scratch ให้ตอบ skip',
-        'จบด้วยบรรทัดต่อข้อ "CRITERION n: pass|fail|skip — หลักฐานสั้นๆ" แล้วตามด้วย VERDICT / CRITERIA / REPRO (VERDICT เป็น fail เมื่อมีข้อใด fail)',
-      ].join('\n');
-      await s.send(prompt);
-      const r = parseVerifyResult(s.lastText, t.criteria);
-      r.usd = s.costUsd;
-      r.limited = !!s.limited;
-      s.close();
-      dev?.stop();
-      office?.stop();
-      if (r.limited) return r;
-      this.emit(make('verify.result', { agent: QA, ticket: t.id, assignee: this.state.jobs[t.id]?.agent, criteria: r.criteria, verdict: r.verdict, repro: r.repro }));
-      return r;
     });
   }
 

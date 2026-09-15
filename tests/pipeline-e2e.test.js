@@ -4,7 +4,8 @@
 // real worktrees, real git merges, real child processes for the dev/Office servers -- and
 // fake Sessions injected through `createSession` that answer with the exact RESULT/VERDICT
 // lines the parsers in pipeline.mjs expect. What is asserted is the harness's own work:
-// claim -> worktree -> implement -> gates -> review -> verify -> merge -> report.
+// claim -> worktree -> implement -> gates -> review -> verify -> merge -> report, and that a
+// session that blows up mid-verify still takes its two child servers down with it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,6 +21,8 @@ import * as wt from '../server/worktree.mjs';
 
 const FEATURE = 'e2e';
 const IMPLEMENTERS = ['eng_m1', 'eng_f1', 'eng_m2'];
+const REVIEWER = 'eng_f2';
+const QA = 'eng_m3';
 const CRITERION = 'marker.txt exists on the ticket branch';
 
 // a tiny TCP listener stands in for the dev server; the office one refuses to start unless it
@@ -33,8 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(what, fn, ms = 30_000) {
   const t0 = Date.now();
   for (;;) {
-    const v = await fn();
-    if (v) return v;
+    if (await fn()) return true;
     if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`);
     await sleep(100);
   }
@@ -47,8 +49,8 @@ const canListen = (port) => new Promise((resolve) => {
   s.listen(port, '127.0.0.1');
 });
 
-/** A throwaway repo with one commit on main. */
-function tempRepo() {
+/** A throwaway repo with one commit on main, a ticket on the board and a real office.md. */
+function fixture({ qaSend = null } = {}) {
   const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ube-e2e-')));
   const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git('init', '-q', '-b', 'main');
@@ -58,36 +60,21 @@ function tempRepo() {
   fs.writeFileSync(path.join(repo, 'README.md'), 'e2e fixture\n');
   git('add', '.');
   git('commit', '-q', '-m', 'init');
-  return { repo, git };
-}
 
-function writeTicket(repo) {
-  const dir = path.join(repo, '.scratch', FEATURE, 'issues');
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, '01-marker.md');
-  fs.writeFileSync(file, [
-    '# 01: Leave a marker on the branch',
-    '',
+  const issues = path.join(repo, '.scratch', FEATURE, 'issues');
+  fs.mkdirSync(issues, { recursive: true });
+  const ticketFile = path.join(issues, '01-marker.md');
+  fs.writeFileSync(ticketFile, [
+    '# 01: Leave a marker on the branch', '',
     '**Status:** ready-for-agent',
-    '**Blocked by:** none',
-    '',
-    '**What to build:** a marker file committed on the ticket branch',
-    '',
-    '## Acceptance criteria',
-    '',
-    `- [ ] ${CRITERION}`,
-    '',
+    '**Blocked by:** none', '',
+    '**What to build:** a marker file committed on the ticket branch', '',
+    '## Acceptance criteria', '',
+    `- [ ] ${CRITERION}`, '',
   ].join('\n'));
-  return file;
-}
 
-test('one ticket end to end: claim, worktree, implement, gates, review by rule, exploratory verify, merge, report', { timeout: 180_000 }, async () => {
-  const { repo, git } = tempRepo();
-  const ticketFile = writeTicket(repo);
   // a high random base so two test files running at once never fight over a port
   const portBase = 21000 + Math.floor(Math.random() * 30000);
-  const devPort = portBase + 1, officePort = portBase + 41;
-
   writeOffice(repo, {
     commands: { dev: DEV_CMD, test: `node -e "console.log('gate ok')"`, office: OFFICE_CMD },
     worktree: { 'port-base': String(portBase) },
@@ -100,7 +87,6 @@ test('one ticket end to end: claim, worktree, implement, gates, review by rule, 
     assert.deepEqual(validate(ev), [], `malformed ${ev.type}: ${JSON.stringify(ev)}`);
     events.push(ev);
   };
-  const of = (type) => events.filter((e) => e.type === type);
 
   // ---- fake sessions: one canned reply per role, and a real git commit for the implementer
   const sessions = [];
@@ -116,7 +102,7 @@ test('one ticket end to end: claim, worktree, implement, gates, review by rule, 
       return '- เพิ่ม marker.txt\nRESULT: done\nEVIDENCE: git log บน branch นี้มี 1 commit\nNEXT: none';
     }
     // the reviewer writes `fail` over an empty Spec list: a pass by rule (parseReviewResult)
-    if (agent === 'eng_f2') return 'ดู diff แล้ว\nVERDICT: fail\nSTANDARDS: ชื่อไฟล์ marker.txt กว้างไป\nSPEC: none';
+    if (agent === REVIEWER) return 'ดู diff แล้ว\nVERDICT: fail\nSTANDARDS: ชื่อไฟล์ marker.txt กว้างไป\nSPEC: none';
     return `CRITERION 1: pass — ${CRITERION}\nVERDICT: pass\nCRITERIA: 1/1\nREPRO: -`;
   };
   const createSession = ({ agent, ticket, options }) => {
@@ -128,6 +114,7 @@ test('one ticket end to end: claim, worktree, implement, gates, review by rule, 
       close() { this.closed = true; },
       async send(text) {
         this.sent.push(text);
+        if (agent === QA && qaSend) return qaSend(text);   // may throw: an SDK error mid-verify
         this.lastText = reply(agent, this.cwd);
         return { type: 'result', subtype: 'success' };
       },
@@ -148,28 +135,55 @@ test('one ticket end to end: claim, worktree, implement, gates, review by rule, 
   };
 
   const state = { feature: FEATURE, phase: 'implement', jobs: {}, runningTotals: {}, managerSessionId: null };
-  const team = Object.fromEntries([...IMPLEMENTERS, 'eng_f2', 'eng_m3']
+  const team = Object.fromEntries([...IMPLEMENTERS, REVIEWER, QA]
     .map((id) => [id, { prompt: `คุณคือ ${id}`, model: 'claude-sonnet-4-5', skills: [] }]));
 
   const pipeline = new Pipeline({
     project: { id: 'e2e', path: repo, mainBranch: 'main' },
     state, team, office: readOffice(repo), emit, save: () => {}, manager, createSession,
-    // #session always builds a canUseTool, so `approvals` is never optional
+    // #session always builds a canUseTool, so `approvals` is required, never optional
     approvals: { canUseToolFor: () => async () => ({ behavior: 'allow', updatedInput: {} }) },
     tickMs: 3_600_000,   // the test drives the ticket itself; no background tick
   });
 
+  const cleanup = async () => {
+    await pipeline.stop();
+    wt.removeTicketWorktree(repo, FEATURE, '01', { keepBranch: true });
+    // a successful mergeTicket leaves the feature branch checked out in .worktrees/<slug>
+    try { git('worktree', 'remove', '--force', path.join(repo, wt.WORKTREES, FEATURE)); } catch { /* never created */ }
+    try { git('worktree', 'prune'); } catch { /* fine */ }
+    for (let i = 0; i < 5; i++) {
+      try { fs.rmSync(repo, { recursive: true, force: true }); break; } catch { await sleep(300); }
+    }
+  };
+
+  return {
+    repo, git, ticketFile, state, events, sessions, managerPrompts, pipeline, cleanup,
+    devPort: portBase + 1, officePort: portBase + 41,
+    of: (type) => events.filter((e) => e.type === type),
+  };
+}
+
+/** Hand the frontier ticket out and wait for the whole run, feature report included. */
+async function runOneTicket(f) {
+  f.pipeline.start();
+  const job = f.pipeline.running.get('01');
+  assert.ok(job, 'the frontier ticket was handed to an implementer at once');
+  assert.ok(IMPLEMENTERS.includes(job.agent), `picked an implementer, got ${job.agent}`);
+  await job.promise;
+  await waitFor('the feature report', () => f.of('feature.report').length > 0);
+  return job;
+}
+
+test('one ticket end to end: claim, worktree, implement, gates, review by rule, exploratory verify, merge, report', { timeout: 180_000 }, async () => {
+  const f = fixture();
+  const { git, of, state, devPort, officePort } = f;
   try {
-    pipeline.start();
-    const job = pipeline.running.get('01');
-    assert.ok(job, 'the frontier ticket was handed to an implementer at once');
-    assert.ok(IMPLEMENTERS.includes(job.agent), `picked an implementer, got ${job.agent}`);
-    await job.promise;
-    await waitFor('the feature report', () => of('feature.report').length > 0);
+    const job = await runOneTicket(f);
 
     // ---------------------------------------------------------------- 1. the ticket closed
     assert.deepEqual(of('error'), [], 'no error event anywhere in the run');
-    const ticketText = fs.readFileSync(ticketFile, 'utf8');
+    const ticketText = fs.readFileSync(f.ticketFile, 'utf8');
     assert.match(ticketText, /^\*\*Status:\*\* done$/m, 'the ticket file ends at Status: done');
     assert.match(ticketText, new RegExp(`^- \\[x\\] ${CRITERION.replace(/\./g, '\\.')}`, 'm'), 'the passed criterion is ticked');
     assert.match(ticketText, /## Comments/, 'the level-1 report was appended');
@@ -204,13 +218,13 @@ test('one ticket end to end: claim, worktree, implement, gates, review by rule, 
     assert.deepEqual(of('verify.result')[0].criteria.map((c) => c.pass), [true]);
 
     // the feature report is the manager's, validated against the level-2 template
-    assert.equal(managerPrompts.length, 1, 'the level-2 report was accepted on the first try');
-    assert.match(managerPrompts[0], new RegExp(FEATURE));
+    assert.equal(f.managerPrompts.length, 1, 'the level-2 report was accepted on the first try');
+    assert.match(f.managerPrompts[0], new RegExp(FEATURE));
     assert.equal(of('feature.report')[0].valid, true);
     assert.equal(state.featureReported, true);
 
     // ---------------------------------------------------------------- 2. what QA was handed
-    const qa = sessions.find((s) => s.agent === 'eng_m3');
+    const qa = f.sessions.find((s) => s.agent === QA);
     assert.ok(qa, 'a QA session was created');
     const prompt = qa.sent[0];
     assert.match(prompt, new RegExp(`ws://localhost:${officePort}/office`), "QA was told the worktree's own Office Server url");
@@ -225,19 +239,45 @@ test('one ticket end to end: claim, worktree, implement, gates, review by rule, 
     }
 
     // one fresh session per role, each closed
-    assert.deepEqual(sessions.map((s) => s.agent).sort(), [job.agent, 'eng_f2', 'eng_m3'].sort());
-    assert.ok(sessions.every((s) => s.closed), 'every session was closed');
+    assert.deepEqual(f.sessions.map((s) => s.agent).sort(), [job.agent, REVIEWER, QA].sort());
+    assert.ok(f.sessions.every((s) => s.closed), 'every session was closed');
     assert.equal(state.jobs['01'].stage, 'done');
     assert.equal(state.jobs['01'].attempt, 1);
     assert.ok(state.jobs['01'].usd > 0, 'the ticket carries the cost of its three sessions');
   } finally {
-    await pipeline.stop();
-    wt.removeTicketWorktree(repo, FEATURE, '01', { keepBranch: true });
-    // mergeTicket leaves the feature branch checked out in .worktrees/<slug>
-    try { git('worktree', 'remove', '--force', path.join(repo, wt.WORKTREES, FEATURE)); } catch { /* never created */ }
-    try { git('worktree', 'prune'); } catch { /* fine */ }
-    for (let i = 0; i < 5; i++) {
-      try { fs.rmSync(repo, { recursive: true, force: true }); break; } catch { await sleep(300); }
+    await f.cleanup();
+  }
+});
+
+test('a QA session that throws escalates the ticket and still takes its two child servers down', { timeout: 180_000 }, async () => {
+  const f = fixture({ qaSend() { throw new Error('QA session exploded'); } });
+  const { of, state, devPort, officePort } = f;
+  try {
+    await runOneTicket(f);
+
+    // the throw came out of #verify, was caught by tick(), and became an event + an escalation
+    const errs = of('error');
+    assert.equal(errs.length, 1, 'exactly one error event, not a crashed process');
+    assert.match(errs[0].message, /QA session exploded/);
+    const esc = of('ticket.escalated');
+    assert.equal(esc.length, 1);
+    assert.equal(esc[0].ticket, '01');
+    // note: the reason is `tail(e.stack, 400)`, so it is the deepest frames, not the message --
+    // the message only survives on the error event above
+    assert.match(esc[0].reason, /^pipeline error: /);
+    assert.match(fs.readFileSync(f.ticketFile, 'utf8'), /^\*\*Status:\*\* ready-for-human$/m);
+    assert.equal(state.jobs['01'].stage, 'escalated');
+    assert.equal(of('ticket.closed').length, 0, 'nothing was merged');
+
+    // the servers really were up before the throw, so the ports below mean something
+    const qa = f.sessions.find((s) => s.agent === QA);
+    assert.match(qa.sent[0], new RegExp(`ws://localhost:${officePort}/office`));
+    assert.match(qa.sent[0], new RegExp(`http://localhost:${devPort}`));
+    assert.ok(qa.closed, 'the QA session was closed by the finally');
+    for (const port of [devPort, officePort]) {
+      await waitFor(`:${port} to be free again after the throw`, () => canListen(port), 20_000);
     }
+  } finally {
+    await f.cleanup();
   }
 });
