@@ -100,5 +100,7 @@ in main) moves the phase to `done`, so the next message in the chat starts a new
 a feature merged by hand while the server was down is settled the same way at the next boot
 (`Flow#settleIfMerged`: every ticket done and `feature/<slug>` contained in main or deleted).
 
-`state/<project>.json` → `jobs` holds each ticket's stage, attempt, branch and cost;
+`state/<project>.json` → `jobs` holds each ticket's stage, attempt, branch and cost (`usd` is
+everything the ticket ever cost across attempts and fix rounds, `usdWasted` the part spent by
+attempts that did not close it; the level-1 and level-2 reports quote both);
 `state/metrics.jsonl` gets one row per closed or escalated ticket.
