@@ -124,9 +124,16 @@ test('ticket worktrees branch from the feature branch, merge back, and rebase th
 
   wt.removeTicketWorktree(repo, 'f', '01');
   assert.ok(!fs.existsSync(w1.path));
+  assert.equal(wt.featureMerged(repo, 'f'), false, 'feature has a commit main lacks');
   const mm = wt.mergeFeatureToMain(repo, 'f');
   assert.equal(mm.ok, true);
   assert.ok(fs.existsSync(path.join(repo, 'b.txt')));
+  assert.equal(wt.featureMerged(repo, 'f'), true);
+  assert.deepEqual(wt.mergeFeatureToMain(repo, 'f'), { ok: true, already: true }, 'pressing merge twice is not an error');
+  git('worktree', 'remove', '--force', path.join(repo, '.worktrees', 'f'));   // mergeTicket keeps the feature branch checked out there
+  git('branch', '-D', 'feature/f');
+  assert.equal(wt.featureMerged(repo, 'f'), false, 'a missing branch is not merged by default');
+  assert.equal(wt.featureMerged(repo, 'f', 'main', { ifMissing: true }), true);
   wt.removeTicketWorktree(repo, 'f', '02');
   fs.rmSync(repo, { recursive: true, force: true });
 });

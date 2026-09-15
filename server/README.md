@@ -95,7 +95,10 @@ appended, and the worktree is kept for you.
 
 When no ticket is open the manager writes the level-2 report (validated against the
 template, one retry), the TV shows it with a **merge into main** button, and a PR is opened
-if `gh` is installed and logged in.
+if `gh` is installed and logged in. A successful merge (or one that finds the branch already
+in main) moves the phase to `done`, so the next message in the chat starts a new interview;
+a feature merged by hand while the server was down is settled the same way at the next boot
+(`Flow#settleIfMerged`: every ticket done and `feature/<slug>` contained in main or deleted).
 
 `state/<project>.json` → `jobs` holds each ticket's stage, attempt, branch and cost;
 `state/metrics.jsonl` gets one row per closed or escalated ticket.

@@ -130,11 +130,23 @@ export function rebaseOpenTickets(repo, feature, exceptId, openIds) {
   return results;
 }
 
-/** Merge the feature branch into main in the repo's own checkout (must be clean and on main). */
+/**
+ * True once feature/<slug> is contained in main -- merged from the panel, by hand, or as part of
+ * a rebase. A branch that no longer exists counts only when `ifMissing` says so: with every
+ * ticket done, deleting it is what a human does after merging; before that it means nothing.
+ */
+export function featureMerged(repo, feature, mainBranch = 'main', { ifMissing = false } = {}) {
+  const b = featureBranch(feature);
+  if (!branchExists(repo, b)) return ifMissing;
+  return tryGit(repo, ['merge-base', '--is-ancestor', b, mainBranch]) !== null;
+}
+
+/** Merge the feature branch into main in the repo's own checkout (must be clean and on main). `already` when there was nothing left to merge. */
 export function mergeFeatureToMain(repo, feature, mainBranch = 'main') {
   const cur = tryGit(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
   if (cur !== mainBranch) return { ok: false, error: `repo อยู่ที่ branch ${cur} ไม่ใช่ ${mainBranch}` };
   if (tryGit(repo, ['status', '--porcelain', '--untracked-files=no'])) return { ok: false, error: 'working tree ของ repo ไม่สะอาด commit หรือ stash ก่อน' };
+  if (featureMerged(repo, feature, mainBranch)) return { ok: true, already: true };
   try {
     git(repo, ['merge', '--no-ff', '-m', `Merge ${featureBranch(feature)}`, featureBranch(feature)]);
     return { ok: true };

@@ -90,7 +90,7 @@ async function activate(p) {
   broadcast(projectStatus());
   broadcast(make('flow.phase', { phase: st.phase, feature: st.feature }));
   flow.refreshBoard();
-  if (!PASSIVE) maybeStartPipeline();
+  if (!PASSIVE && !flow.settleIfMerged()) maybeStartPipeline();   // a feature merged by hand while the server was down
 }
 
 /** The downstream half runs whenever there is a feature with tickets and the flow is past to-tickets. */
@@ -208,8 +208,13 @@ async function handle(msg, ws) {
     case 'merge': {
       if (!project || !st.feature) break;
       const r = mergeFeatureToMain(project.path, st.feature, project.mainBranch);
+      if (r.ok) {
+        // the feature is over: idle, so the next message in the chat starts a new interview
+        await pipeline?.stop();
+        flow?.setPhase('done');
+      }
       broadcast(make('agent.say', { agent: 'manager', text: r.ok
-        ? `รวม ${featureBranch(st.feature)} เข้า ${project.mainBranch} แล้ว`
+        ? `${r.already ? `${featureBranch(st.feature)} อยู่ใน ${project.mainBranch} อยู่แล้ว` : `รวม ${featureBranch(st.feature)} เข้า ${project.mainBranch} แล้ว`} ปิดงานนี้ พร้อมรับไอเดียใหม่`
         : `รวมไม่ได้: ${r.error}` }));
       break;
     }

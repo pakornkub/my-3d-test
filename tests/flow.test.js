@@ -66,6 +66,22 @@ test('answering a flow.ask sends the text back as the next turn; an empty answer
   assert.equal(events.filter((e) => e.type === 'flow.ask').length, 2);
 });
 
+test('settleIfMerged closes a finished feature only when every ticket is done and the branch is in main', () => {
+  const { flow, state, types } = setup({ phase: 'implement', feature: 'f' });
+  const issues = path.join(flow.repo, '.scratch', 'f', 'issues');
+  fs.mkdirSync(issues, { recursive: true });
+  fs.writeFileSync(path.join(issues, '01-a.md'), '# 01: A\n**Status:** done\n');
+  fs.writeFileSync(path.join(issues, '02-b.md'), '# 02: B\n**Status:** in-progress\n');
+  assert.equal(flow.settleIfMerged(() => true), false, 'an open ticket keeps the feature alive');
+  fs.writeFileSync(path.join(issues, '02-b.md'), '# 02: B\n**Status:** done\n');
+  assert.equal(flow.settleIfMerged(() => false), false, 'done tickets but the branch is not in main yet');
+  assert.equal(state.phase, 'implement');
+  assert.equal(flow.settleIfMerged(() => true), true);
+  assert.equal(state.phase, 'done');
+  assert.ok(types().includes('flow.phase'));
+  assert.equal(flow.settleIfMerged(() => true), false, 'idempotent once done');
+});
+
 test('next: spec then tickets advance the phase in order and refuse to go backwards', async () => {
   const { flow, s, state, events } = setup({ phase: 'grill', feature: 'f' });
   await flow.onNext('spec');

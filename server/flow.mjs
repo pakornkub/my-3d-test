@@ -17,6 +17,7 @@ import { readBoard, listFeatures, watchBoard } from './board.mjs';
 import { agentDefinitions, teamHash } from './team.mjs';
 import { managerRunningTotal } from './costs.mjs';
 import { readOffice, dailyBudgetUsd } from './office.mjs';
+import { featureMerged } from './worktree.mjs';
 
 const PLUGIN = 'mattpocock-skills';
 const PLUGIN_VERSION = '1.2.3';
@@ -242,6 +243,23 @@ export class Flow {
       this.unwatch();
       this.unwatch = watchBoard(this.repo, f.slug, () => this.refreshBoard());
     }
+  }
+
+  /**
+   * Close a feature the phase never followed: every ticket done and the feature branch already
+   * in main (merged from the panel, by hand, or deleted after merging). Without this the phase
+   * stays `implement` with the feature set, and the next idea typed into the chat is a plain
+   * turn in the old context instead of a new interview -- see the idle test in onCommand.
+   * Returns true when the phase moved. `merged` is injectable for tests.
+   */
+  settleIfMerged(merged = (f) => featureMerged(this.repo, f, this.project.mainBranch ?? 'main', { ifMissing: true })) {
+    if (this.phase !== 'implement' || !this.state.feature) return false;
+    const tickets = readBoard(this.repo, this.state.feature);
+    if (!tickets.length || !tickets.every((t) => t.status === 'done')) return false;
+    if (!merged(this.state.feature)) return false;
+    this.setPhase('done');
+    this.emit(make('agent.say', { agent: 'manager', text: `feature/${this.state.feature} อยู่ใน ${this.project.mainBranch ?? 'main'} แล้ว ปิดงานนี้ พร้อมรับไอเดียใหม่` }));
+    return true;
   }
 
   refreshBoard() {
