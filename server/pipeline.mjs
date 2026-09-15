@@ -170,6 +170,20 @@ export function featureCosts(jobs, managerUsd = 0) {
  * Office Server's port and then asked to kill the process holding it. `port` is the ticket's
  * own allotment, the same one its gates run with.
  */
+/**
+ * The commands a ticket's gates and QA run with: the worktree's own docs/agents/office.md
+ * (the code under test says how to test it -- the skeleton ticket is the one that fills
+ * `test`/`e2e` in the first place) over the project's, so a slot the ticket left empty still
+ * falls back to the project's value.
+ */
+export function commandsFor(repo, worktreePath) {
+  const base = readOffice(repo)?.commands ?? {};
+  const own = readOffice(worktreePath)?.commands ?? {};
+  const out = { ...base };
+  for (const [k, v] of Object.entries(own)) if (v) out[k] = v;
+  return out;
+}
+
 export function sessionEnv(port, base = process.env) {
   const { PORT, OFFICE_PORT, OFFICE_PROJECT, OFFICE_PASSIVE, ...rest } = base;
   return { ...rest, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...(port ? { PORT: String(port) } : {}) };
@@ -429,7 +443,7 @@ export class Pipeline {
     for (;;) {
       st.stage = 'gates'; this.save();
       // each gate run gets its own port (base + 81 + n) so two worktrees' e2e never bind the same one
-      gates = await runGates(w.path, this.commands, { port: st.port, onResult: (g, r) => this.emit(make('gate.result', { agent, ticket: id, gate: g, pass: r.pass, output: tail(r.output, 600) })) });
+      gates = await runGates(w.path, commandsFor(this.repo, w.path), { port: st.port, onResult: (g, r) => this.emit(make('gate.result', { agent, ticket: id, gate: g, pass: r.pass, output: tail(r.output, 600) })) });
       const failedGates = gates.filter((g) => !g.pass);
       let feedback = null;
       if (failedGates.length) {
@@ -574,16 +588,17 @@ export class Pipeline {
       // whatever happens below, the two child servers and the session are torn down: a throw
       // here used to leave them holding their ports until the whole server exited
       try {
-        if (exploratory && this.commands.dev) {
+        const commands = commandsFor(this.repo, w.path);
+        if (exploratory && commands.dev) {
           const base = num(this.office?.worktree?.['port-base'], 3100), n = this.slot++ % 40;
           const port = base + 1 + n, officePort = base + 41 + n;
           // the worktree's own Office Server (passive, pinned to the worktree) first, so the dev
           // server's /office proxy reaches the diff's server code instead of the shared one on :5181
-          if (this.commands.office) {
-            office = await wt.startOfficeServer(this.commands.office, w.path, officePort);
+          if (commands.office) {
+            office = await wt.startOfficeServer(commands.office, w.path, officePort);
             if (!office) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `Office Server ของ worktree ไม่ขึ้นที่ :${officePort} ข้อที่ต้องใช้ server ของ diff นี้จะถูก skip` }));
           }
-          dev = await wt.startDevServer(this.commands.dev, w.path, port, 40_000, office ? { OFFICE_PORT: String(officePort) } : {});
+          dev = await wt.startDevServer(commands.dev, w.path, port, 40_000, office ? { OFFICE_PORT: String(officePort) } : {});
           if (!dev) this.emit(make('agent.say', { agent: QA, ticket: t.id, text: `dev server ไม่ขึ้นที่ :${port} ตรวจได้เฉพาะแบบ scripted` }));
         }
         const browser = qaBrowser();
@@ -596,7 +611,7 @@ export class Pipeline {
           `ตรวจรับใบ ${t.id}: ${t.title}`,
           `ไฟล์ ticket: ${path.relative(this.repo, t.file).replace(/\\/g, '/')} · spec: .scratch/${this.feature}/spec.md`,
           `โหมด: ${this.policy.verify}` + (dev ? ` · หน้าเว็บของ worktree นี้เปิดอยู่ที่ ${dev.url} (ใช้เครื่องมือ playwright: navigate, click, evaluate, screenshot)` : ''),
-          `คำสั่งที่รันได้: ${Object.entries(this.commands).filter(([k, v]) => v && k !== 'office').map(([k, v]) => `${k}: ${v}`).join(' · ')}`,
+          `คำสั่งที่รันได้: ${Object.entries(commands).filter(([k, v]) => v && k !== 'office').map(([k, v]) => `${k}: ${v}`).join(' · ')}`,
           '',
           'Acceptance criteria:',
           criteria,

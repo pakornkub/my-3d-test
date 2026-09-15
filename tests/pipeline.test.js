@@ -187,6 +187,20 @@ test('a feature report the manager cannot write is not recorded as written', asy
 });
 
 // ---------------------------------------------------------------- gates
+test('commandsFor prefers the worktree\'s office.md slots and falls back to the project\'s', async () => {
+  const { commandsFor } = await import('../server/pipeline.mjs');
+  const { writeOffice, DEFAULTS } = await import('../server/office.mjs');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ube-cmd-')), wtree = fs.mkdtempSync(path.join(os.tmpdir(), 'ube-cmd-wt-'));
+  writeOffice(repo, { ...DEFAULTS, commands: { ...DEFAULTS.commands, dev: 'npm run dev -- --port {port}' } });
+  writeOffice(wtree, { ...DEFAULTS, commands: { ...DEFAULTS.commands, test: 'node --test', e2e: 'npx playwright test' } });
+  const c = commandsFor(repo, wtree);
+  assert.equal(c.test, 'node --test', 'a slot the ticket filled');
+  assert.equal(c.e2e, 'npx playwright test');
+  assert.equal(c.dev, 'npm run dev -- --port {port}', 'a slot the ticket left empty keeps the project value');
+  assert.deepEqual(commandsFor(repo, path.join(wtree, 'nowhere')).test, '', 'no office.md in the worktree: the project\'s commands');
+  fs.rmSync(repo, { recursive: true, force: true }); fs.rmSync(wtree, { recursive: true, force: true });
+});
+
 test('sessionEnv drops the server\'s PORT and OFFICE_* and sets the ticket\'s own PORT', async () => {
   const { sessionEnv } = await import('../server/pipeline.mjs');
   const env = sessionEnv(3182, { PATH: 'x', PORT: '5181', OFFICE_PORT: '5181', OFFICE_PROJECT: 'p', OFFICE_PASSIVE: '1' });
