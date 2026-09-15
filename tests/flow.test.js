@@ -247,6 +247,33 @@ test('parseFrontierQuestions is tolerant: no bold, Latin keys, "-" separators, a
   assert.equal(q.why, 'fewer copies to reconcile');
 });
 
+test('parseFrontierQuestions reads bullet options with the key inside bold, and turns a recommendation-only question into one accept button', () => {
+  // the shape the manager used in the todo-app interview, which the first parser fell back on
+  const text = ['เรียก skill แล้ว', '', '---', '',
+    '❓ **Q1** — **คำศัพท์หลักของ domain**: ชื่อที่จะไปอยู่ในชื่อฟังก์ชัน', '',
+    '➡️ ใช้ TodoMVC canon: เอนทิตีชื่อ **Task**, ฟิลด์ `completed: boolean`', '', '---', '',
+    '❓ **Q2** — **รูปร่างของโมดูล pure**: ข้อ (3) บอกว่าต้อง pure', '',
+    '- **(a) ฟังก์ชันบนอาร์เรย์ immutable**: addTask(tasks, task) — state ข้างนอก',
+    '- **(b) reducer ตัวเดียว**: reduce(state, action)',
+    '- **(c) class ที่มี method** — ไม่ pure', '',
+    '➡️ **(a)** — บางที่สุด เทสต์อ่านง่าย'].join('\n');
+  const p = parseFrontierQuestions(text);
+  assert.equal(p.questions.length, 2);
+  const [q1, q2] = p.questions;
+  assert.equal(q1.id, 'Q1');
+  assert.deepEqual(q1.options.map((o) => [o.key, o.label, o.recommended]), [['✓', 'ตามที่แนะนำ', true]]);
+  assert.match(q1.options[0].description, /TodoMVC canon/);
+  assert.equal(q1.recommended, '✓');
+  assert.deepEqual(q2.options.map((o) => o.key), ['a', 'b', 'c']);
+  assert.equal(q2.options[0].label, 'ฟังก์ชันบนอาร์เรย์ immutable');
+  assert.match(q2.options[0].description, /^addTask/);
+  assert.equal(q2.options[2].label, 'class ที่มี method');
+  assert.equal(q2.recommended, 'a');
+  assert.equal(q2.why, 'บางที่สุด เทสต์อ่านง่าย');
+  // a recommendation-only reply with no lettered options anywhere still becomes a widget
+  assert.equal(parseFrontierQuestions('❓ **Q1** — **ชื่อ**: อะไรดี\n➡️ ใช้ Task').questions[0].recommended, '✓');
+});
+
 test('parseFrontierQuestions returns null for anything that is not a question with options', () => {
   assert.equal(parseFrontierQuestions('สรุปแล้วผมจะเริ่มจากใบ 01 ครับ ไม่มีคำถาม'), null);
   assert.equal(parseFrontierQuestions('❓ อยากได้แบบไหนครับ?'), null, 'a question with no options');

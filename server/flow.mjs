@@ -333,7 +333,8 @@ export function readSkillBody(name) {
 
 const Q_LINE = /^(?:❓|❔)\s*(.*)$/u;
 const REC_LINE = /^(?:➡️|➡|→|=>|->)\s*(.*)$/u;
-const OPT_LINE = /^[(（]\s*([^)）]{1,8}?)\s*[)）]\s*(.+)$/u;
+// an option may be a bullet ("- (a) …") and the key may sit inside bold ("- **(a) label**: …")
+const OPT_LINE = /^(?:[-*•]\s+)?\*{0,2}\s*[(（]\s*([^)）]{1,8}?)\s*[)）]\s*(.+)$/u;
 const RULE_LINE = /^(?:-{3,}|={3,}|_{3,}|\*{3,})$/;
 const ID_RE = /^\*{0,2}\s*(Q\s*\d+\s*['’ʼ′`]?)\s*\*{0,2}/iu;
 
@@ -374,7 +375,7 @@ export function parseFrontierQuestions(text) {
       const idm = rest.match(ID_RE);
       const id = idm ? idm[1].replace(/\s+/g, '') : `Q${questions.length + 1}`;
       const [header, body] = splitLabel(stripSep(idm ? rest.slice(idm[0].length) : rest));
-      q = { id, header, question: body, options: [], recommended: null, why: '', recKey: null };
+      q = { id, header, question: body, options: [], recommended: null, why: '', recKey: null, recText: '' };
       tail = 'question';
       continue;
     }
@@ -382,6 +383,7 @@ export function parseFrontierQuestions(text) {
     const rm = line.match(REC_LINE);
     if (rm) {
       const body = rm[1];
+      q.recText = clean(body);
       const km = body.match(/[(（]\s*\*{0,2}\s*([^)）*]{1,8}?)\s*\*{0,2}\s*[)）]/u);
       if (km) {
         q.recKey = clean(km[1]);
@@ -414,13 +416,23 @@ export function parseFrontierQuestions(text) {
   for (const item of questions) {
     const key = item.recKey;
     delete item.recKey;
+    // a question the manager answered itself ("➡️ do X because …") with no lettered options:
+    // one button that accepts the recommendation, so the whole reply still becomes a widget
+    if (!item.options.length && item.recText) {
+      item.options.push({ key: '✓', label: 'ตามที่แนะนำ', description: item.recText, recommended: true });
+      item.recommended = '✓';
+      item.why = '';   // the whole recommendation is the option's description already
+      delete item.recText;
+      continue;
+    }
+    delete item.recText;
     if (!key) continue;
     const low = key.toLowerCase();
     const hit = item.options.find((o) => o.key.toLowerCase() === low)
       ?? item.options.find((o) => o.label.toLowerCase().startsWith(low));
     if (hit) { hit.recommended = true; item.recommended = hit.key; }
   }
-  if (!questions.some((item) => item.options.length >= 2)) return null;
+  if (!questions.some((item) => item.options.length >= 2 || item.recommended === '✓')) return null;
   return { intro: intro.join('\n').replace(/\n{3,}/g, '\n\n').trim(), questions };
 }
 
