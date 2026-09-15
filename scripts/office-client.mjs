@@ -13,8 +13,9 @@
 
 import WebSocket from 'ws';
 
-const [, , cmd = 'watch', ...args] = process.argv;
-const once = args.includes('--once');
+const [, , cmd = 'watch', ...rawArgs] = process.argv;
+const once = rawArgs.includes('--once');
+const args = rawArgs.filter((a) => a !== '--once');   // never let the flag leak into a `say` text
 const url = process.env.OFFICE_URL ?? 'ws://localhost:5181/office';
 const now = () => Date.now();
 const ws = new WebSocket(url);
@@ -36,8 +37,16 @@ ws.on('open', () => {
   console.log('connected', url);
   const m = messages[cmd];
   if (m && cmd !== 'recheck') ws.send(JSON.stringify({ v: 1, t: now(), ...m() }), () => { sent = true; });
+  // `allow` and `next` get no reply of their own: with --once, leave a moment after sending
+  if (once && ['allow', 'next', 'cancel', 'retry'].includes(cmd)) setTimeout(quit, 1500);
 });
-const quit = () => { if (sent) process.exit(0); else setTimeout(quit, 50); };
+// --once: leave only after our own frame is on the wire, and close the socket instead of killing
+// the process -- process.exit() right after send()'s callback dropped the frame on Windows
+const quit = () => {
+  if (!sent) return setTimeout(quit, 50);
+  ws.close();
+  setTimeout(() => process.exit(0), 500);
+};
 
 ws.on('message', (d) => {
   const e = JSON.parse(String(d));
@@ -56,7 +65,7 @@ ws.on('message', (d) => {
   }
   const extra = e.text ?? e.summary ?? e.message ?? e.phase ?? e.path ?? (e.tickets ? `${e.tickets.length} tickets` : '');
   console.log(`${e.type}${e.agent ? ' [' + e.agent + ']' : ''}${e.askId ? ' askId=' + e.askId : ''} ${String(extra).replace(/\s+/g, ' ').slice(0, 300)}`);
-  if (once && ["agent.say", "flow.ask", "error"].includes(e.type)) quit();
+  if (once && !e.replayed && ["agent.say", "flow.ask", "error"].includes(e.type)) quit();   // a replayed event is history, not the reply
 });
 
 ws.on('error', (e) => { console.error('cannot connect:', e.message); process.exit(1); });
