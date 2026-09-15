@@ -309,7 +309,8 @@ export class Pipeline {
       this.running.set(t.id, job);
       job.promise = this.runTicket(t, agent, job).catch((e) => {
         this.emit(make('error', { agent, ticket: t.id, message: `pipeline: ${e.message ?? e}` }));
-        this.#escalate(t, `pipeline error: ${tail(String(e.stack ?? e), 400)}`);
+        // message first: tail() keeps the end of a stack trace, which would cut the message off
+        this.#escalate(t, `pipeline error: ${e?.message ?? e}${e?.stack ? '\n' + tail(String(e.stack), 400) : ''}`);
       }).finally(() => { this.running.delete(t.id); this.tick(); this.#reportWhenDone(); });
     }
     if (!this.running.size) this.#reportWhenDone();
