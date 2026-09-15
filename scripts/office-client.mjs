@@ -28,6 +28,7 @@ const messages = {
   next: () => ({ type: 'flow.next', phase: args[0] }),
   recheck: () => ({ type: 'project.recheck', project: project ?? '-', step: Number(args[0]), action: args[1] ?? 'run' }),
   cancel: () => ({ type: 'cancel' }),
+  retry: () => ({ type: 'ticket.retry', ticket: args[0], ...(args[1] ? { stage: args[1] } : {}) }),   // retry 03 [implement|review|verify]
 };
 
 let sent = !messages[cmd] || cmd === 'recheck';   // --once may only exit after our own message left the socket

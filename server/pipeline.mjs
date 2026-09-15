@@ -162,7 +162,7 @@ export class Pipeline {
   start() {
     if (this.active) return;
     this.active = true;
-    this.reported = false;
+    this.reported = !!this.state.featureReported;   // a restart must not write the report twice
     this.#resume();
     this.tick();
     this.timer = setInterval(() => this.tick(), 15_000);
@@ -177,13 +177,21 @@ export class Pipeline {
   }
 
   /** Put an escalated ticket back on the board, resuming at review when its work is already committed. */
-  requeue(id) {
+  /**
+   * @param stage  where to resume: 'implement' | 'review' | 'verify'. Default: review when the
+   *               work is committed. 'verify' means the human accepted the diff in place of the
+   *               reviewer, so the review step is skipped once and recorded as such.
+   */
+  requeue(id, stage = null) {
     const t = this.board().find((x) => x.id === id);
     if (!t) return false;
     const st = this.state.jobs[id] ?? (this.state.jobs[id] = { attempt: 0, usd: 0 });
     const hasCommits = wt.ticketCommits(this.repo, this.feature, id).length > 0;
-    st.stage = 'pending'; st.attempt = 0; st.resumeStage = hasCommits ? 'review' : 'implement'; delete st.reason;
+    st.stage = 'pending'; st.attempt = 0; delete st.reason;
+    st.resumeStage = stage ?? (hasCommits ? 'review' : 'implement');
+    if (st.resumeStage !== 'implement' && !hasCommits) st.resumeStage = 'implement';
     setTicketField(t.file, 'Status', 'in-progress');
+    this.reported = false; this.state.featureReported = false;   // the feature report must be written again after this closes
     this.save();
     this.emit(make('agent.say', { agent: 'manager', text: `ใบ ${id} กลับเข้าบอร์ด เริ่มที่ขั้น ${st.resumeStage}` }));
     this.emitBoard();
@@ -342,7 +350,11 @@ export class Pipeline {
         feedback = `gate ที่ server รันเองไม่ผ่าน:\n` + failedGates.map((g) => `### ${g.gate}: ${g.command}\n${tail(g.output, 1500)}`).join('\n\n') + '\n\nแก้ให้ผ่านแล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง';
       } else {
         st.stage = 'review'; this.save();
-        review = await this.#review(t, w);
+        if (startAt === 'verify' && !review) {
+          // the human took the reviewer's seat for this ticket: recorded, not re-run
+          review = { verdict: 'pass', standards: [], spec: [], usd: 0, byHuman: true };
+          this.emit(make('review.result', { agent: REVIEWER, ticket: id, assignee: agent, standards: [], spec: [], verdict: 'pass', byHuman: true }));
+        } else review = await this.#review(t, w);
         if (review.limited) return pauseFor('review', 'reviewer hit the usage limit');
         if (review.verdict !== 'pass') {
           feedback = `reviewer ส่งกลับ:\nSTANDARDS: ${review.standards.join('; ') || 'none'}\nSPEC: ${review.spec.join('; ') || 'none'}\n\nแก้ตาม finding แล้วจบด้วย RESULT/EVIDENCE/NEXT อีกครั้ง`;
@@ -553,6 +565,7 @@ export class Pipeline {
       report = await this.managerTurn(`รายงานยังไม่ตรง template: ${errs.join(', ')} เขียนใหม่ทั้งฉบับให้ครบ 7 หัวข้อตามลำดับ`);
       errs = validateReport(report ?? '', 2);
     }
+    this.state.featureReported = true; this.save();
     this.emit(make('feature.report', { feature: this.feature, report: report ?? '(ไม่มีรายงาน)', valid: !errs.length, diffStat: diff }));
     const pr = wt.openPullRequest(this.repo, this.feature, { mainBranch: this.project.mainBranch, title: `feature: ${this.feature}`, body: report ?? '' });
     if (pr.ok) this.emit(make('ci.status', { pr: pr.url, state: 'opened' }));

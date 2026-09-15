@@ -172,7 +172,7 @@ async function handle(msg, ws) {
       flow?.onNext(msg.phase).then(() => maybeStartPipeline()).catch((e) => broadcast(make('error', { message: e.message })));
       break;
     case 'ticket.retry':
-      if (!pipeline?.requeue(msg.ticket)) broadcast(make('error', { message: 'ไม่พบใบ ' + msg.ticket }));
+      if (!pipeline?.requeue(msg.ticket, msg.stage ?? null)) broadcast(make('error', { message: 'ไม่พบใบ ' + msg.ticket }));
       break;
     case 'merge': {
       if (!project || !st.feature) break;
