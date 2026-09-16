@@ -28,6 +28,15 @@ test('parseReviewResult splits finding lists and treats none as empty', () => {
   assert.equal(parseReviewResult('no verdict line').verdict, 'fail');
 });
 
+test('parseReviewResult ignores a Spec entry that only says nothing was violated', () => {
+  const r = parseReviewResult('VERDICT: fail\nSTANDARDS: Task literal ซ้ำ 5 ครั้ง\nSPEC: 49-57 · ไม่มี ADR ไหนถูกขัด');
+  assert.deepEqual(r.spec, []);
+  assert.equal(r.verdict, 'pass');
+  assert.equal(r.byRule, true);
+  assert.deepEqual(parseReviewResult('VERDICT: pass\nSTANDARDS: none\nSPEC: no spec violations found').spec, []);
+  assert.deepEqual(parseReviewResult('VERDICT: fail\nSTANDARDS: none\nSPEC: ไม่มี field startedAt ใน hello').spec, ['ไม่มี field startedAt ใน hello'], 'a real "missing X" finding is kept');
+});
+
 test('parseReviewResult lets the Spec list decide: standards-only or empty fails pass by rule, a pass is never overruled', () => {
   // the two escalations of the first overnight run: `fail` above two empty lists
   const empty = parseReviewResult('VERDICT: fail\nSTANDARDS: none\nSPEC: none');

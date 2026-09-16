@@ -88,11 +88,15 @@ export function parseImplementResult(text = '') {
  * reviewer's `pass` is never overruled, and no VERDICT line at all stays a fail: the
  * reviewer never finished.
  */
+// A "finding" that only says nothing was found ("49-57 · ไม่มี ADR ไหนถูกขัด", "no violations") is
+// the reviewer writing prose where `none` belongs; it must not fail the ticket.
+const NOTHING_FOUND = /^(?:[\d\s,–-]+\s*[·:—-]\s*)?(?:none|n\/a|-|ไม่มี(?:\s*\S+){0,4}\s*(?:ขัด|ละเมิด|ผิด)|no\s+(?:\w+\s+){0,3}(?:violat|issue|finding|problem|conflict)\w*)(?![\p{L}\p{N}])/iu;
+
 export function parseReviewResult(text = '') {
   const said = /VERDICT:\s*(pass|fail)/i.exec(text)?.[1]?.toLowerCase() ?? null;
   const list = (key) => {
     const raw = new RegExp(`${key}:\\s*(.+)`, 'i').exec(text)?.[1]?.trim() ?? '';
-    return /^none\b/i.test(raw) || !raw ? [] : raw.split(/\s*;\s*/).filter(Boolean);
+    return /^none\b/i.test(raw) || !raw ? [] : raw.split(/\s*;\s*/).filter(Boolean).filter((f) => !NOTHING_FOUND.test(f));
   };
   const standards = list('STANDARDS'), spec = list('SPEC');
   const verdict = !said ? 'fail' : said === 'pass' || !spec.length ? 'pass' : 'fail';
