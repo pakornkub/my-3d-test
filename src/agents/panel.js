@@ -13,7 +13,14 @@ const COLS = [
   ['review', 'รีวิว'], ['verify', 'ตรวจรับ'], ['done', 'เสร็จ'], ['needs-human', 'ต้องให้คน'],
 ];
 
-const NEXT_OF = { grill: ['spec', 'เขียนสเปก'], spec: ['tickets', 'แตกเป็น ticket'], tickets: ['implement', 'ให้ทีมลงมือ'], implement: ['done', 'ปิดงาน'] };
+// every step the human may take from a phase; the first is the usual one
+const NEXT_OF = {
+  grill: [['spec', 'เขียนสเปก']],
+  spec: [['tickets', 'แตกเป็น ticket']],
+  tickets: [['implement', 'ให้ทีมลงมือ']],
+  implement: [['architecture', 'ทบทวนโครงสร้าง'], ['done', 'ปิดงาน']],
+  architecture: [['tickets', 'แตกข้อที่เลือกเป็น ticket'], ['done', 'ปิดงาน']],
+};
 
 export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock, onTab, onNext, onProjectAdd, onProjectSelect, onRecheck, onCancel, onMerge }) {
   const root = document.getElementById('panel');
@@ -101,15 +108,14 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
     phaseBar.innerHTML = '';
     if (!live) { phaseBar.hidden = true; return; }
     phaseBar.hidden = false;
-    const next = NEXT_OF[currentPhase];
     const idle = currentPhase === 'implement' && !feature;
-    if (next && !idle) {
+    if (!idle) (NEXT_OF[currentPhase] ?? []).forEach(([phase, label], i) => {
       const b = document.createElement('button');
-      b.className = 'primary';
-      b.textContent = next[1] + ' →';
-      b.addEventListener('click', () => onNext?.(next[0]));
+      if (!i) b.className = 'primary';
+      b.textContent = label + ' →';
+      b.addEventListener('click', () => onNext?.(phase));
       phaseBar.appendChild(b);
-    }
+    });
     const stop = document.createElement('button');
     stop.textContent = 'หยุดผู้จัดการ';
     stop.addEventListener('click', () => onCancel?.());
@@ -335,8 +341,12 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
     if (!docs.size) { docsEl.innerHTML = '<p class="empty">ยังไม่มีเอกสาร ผู้จัดการจะสร้าง CONTEXT.md และ ADR ระหว่างสัมภาษณ์</p>'; return; }
     const list = document.createElement('ul');
     list.className = 'doclist';
-    const view = document.createElement('pre');
-    view.className = 'docview';
+    const doc = docs.get(selected);
+    // the architecture review's HTML report: scripts on (Tailwind, Mermaid) but no same-origin,
+    // so the page cannot reach the panel, the socket or storage
+    const report = doc?.kind === 'report' && doc.content;
+    const view = document.createElement(report ? 'iframe' : 'pre');
+    view.className = report ? 'docframe' : 'docview';
     for (const [path, d] of docs) {
       const li = document.createElement('li');
       li.textContent = path;
@@ -344,7 +354,11 @@ export function createPanel({ labels, onCommand, onFlowAnswer, onAnswer, onMock,
       li.addEventListener('click', () => renderDocs(path));
       list.appendChild(li);
     }
-    view.textContent = docs.get(selected)?.content || '(ไม่มีเนื้อหาแนบมา)';
+    if (report) {
+      view.setAttribute('sandbox', 'allow-scripts');
+      view.title = selected;
+      view.srcdoc = doc.content;
+    } else view.textContent = doc?.content || '(ไม่มีเนื้อหาแนบมา)';
     docsEl.append(list, view);
   }
   renderDocs();

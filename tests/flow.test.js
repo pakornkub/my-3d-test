@@ -165,6 +165,94 @@ test('editing daily-budget-usd on disk changes the next snapshot without reconst
   assert.equal(flow.snapshot().dailyBudgetUsd, 8);
 });
 
+// ---------------------------------------------------------------- architecture review
+test('a reported feature enters the architecture phase once: the skill goes out with the report kept in .scratch', async () => {
+  const { flow, s, state, events } = setup({ phase: 'implement', feature: 'f' });
+  assert.equal(await flow.onFeatureReported(), true);
+  assert.equal(state.phase, 'architecture');
+  assert.equal(state.architectureFor, 'f');
+  assert.match(s.sent.at(-1), /improve-codebase-architecture|deepening opportunities/i);
+  assert.match(s.sent.at(-1), /\.scratch\/f\/architecture-review\.html/, 'the report lands where the manager may write');
+  assert.match(s.sent.at(-1), /feature\/f/, 'scoped to what this feature changed');
+  assert.ok(events.some((e) => e.type === 'flow.phase' && e.phase === 'architecture' && e.hitl), 'the human is expected to answer');
+  assert.ok(events.some((e) => e.type === 'flow.ask'), 'the manager\'s question waits for the human');
+  for (const e of events) assert.deepEqual(validate(e), [], `${e.type} is a valid event`);
+
+  // the report is written again after a second batch of tickets: no second review on its own
+  state.phase = 'implement';
+  const n = s.sent.length;
+  assert.equal(await flow.onFeatureReported(), false);
+  assert.equal(state.phase, 'implement');
+  assert.equal(s.sent.length, n);
+});
+
+test('architecture-review: manual in office.md leaves a finished feature alone', async () => {
+  const { flow, s, state } = setup({ phase: 'implement', feature: 'f' });
+  writeOffice(flow.repo, { ...DEFAULTS, policy: { ...DEFAULTS.policy, 'architecture-review': 'manual' } });
+  assert.equal(await flow.onFeatureReported(), false);
+  assert.equal(state.phase, 'implement');
+  assert.equal(s.sent.length, 0);
+  await flow.onNext('architecture');   // the panel button still runs it
+  assert.equal(state.phase, 'architecture');
+  assert.equal(s.sent.length, 1);
+});
+
+test('the review button waits for every ticket to close', async () => {
+  const { flow, s, state, events } = setup({ phase: 'implement', feature: 'f' });
+  const issues = path.join(flow.repo, '.scratch', 'f', 'issues');
+  fs.mkdirSync(issues, { recursive: true });
+  fs.writeFileSync(path.join(issues, '01-a.md'), '# 01: A\n**Status:** done\n');
+  fs.writeFileSync(path.join(issues, '02-b.md'), '# 02: B\n**Status:** in-progress\n');
+  await flow.onNext('architecture');
+  assert.equal(state.phase, 'implement');
+  assert.equal(s.sent.length, 0);
+  assert.match(events.at(-1).text, /02/);
+  fs.writeFileSync(path.join(issues, '02-b.md'), '# 02: B\n**Status:** done\n');
+  await flow.onNext('architecture');
+  assert.equal(state.phase, 'architecture');
+  flow.unwatch();
+});
+
+test('from architecture the human either loops back to tickets (report owed again) or closes the feature', async () => {
+  const { flow, s, state } = setup({ phase: 'architecture', feature: 'f' });
+  state.featureReported = true;
+  await flow.onNext('tickets');
+  assert.equal(state.phase, 'tickets', 'going back to tickets is the one backwards step architecture allows');
+  assert.match(s.sent.at(-1), /to-tickets|tracer/i);
+  assert.match(s.sent.at(-1), /architecture/i, 'the tickets come from the agreed candidate, not the spec again');
+  assert.equal(state.featureReported, false, 'the new tickets need their own report');
+
+  const other = setup({ phase: 'architecture', feature: 'f' });
+  await other.flow.onNext('done');
+  assert.equal(other.state.phase, 'done');
+  await other.flow.onNext('tickets');
+  assert.equal(other.state.phase, 'done', 'done is still final');
+});
+
+test('an HTML report the manager writes under .scratch reaches the docs tab as a report', async () => {
+  const events = [];
+  let onFile;
+  const s = fakeSession();
+  const repo = emptyRepo();
+  const flow = new Flow({
+    project: { id: 'p', path: repo, mainBranch: 'main' },
+    state: { phase: 'architecture', feature: 'f', runningTotals: {} }, team: {},
+    office: null, emit: (e) => events.push(e), approvals: null, save: () => {},
+    createSession: (o) => { onFile = o.onFile; return s; },
+  });
+  await flow.ensureManager();
+  const rel = '.scratch/f/architecture-review.html';
+  fs.mkdirSync(path.join(repo, '.scratch', 'f'), { recursive: true });
+  const html = '<!doctype html><title>r</title>' + 'x'.repeat(30_000);
+  fs.writeFileSync(path.join(repo, rel), html);
+  onFile(rel);
+  const doc = events.find((e) => e.type === 'docs.update');
+  assert.ok(doc, 'docs.update emitted');
+  assert.equal(doc.kind, 'report');
+  assert.equal(doc.path, rel);
+  assert.equal(doc.content, html, 'a report is not cut at the 20 kB a markdown doc gets');
+});
+
 // ---------------------------------------------------------------- frontier questions
 // An ask captured from a real grill session. (Two were captured; they came out
 // byte-identical, so one fixture stands for both.)

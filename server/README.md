@@ -24,7 +24,7 @@ which one it picked.
 | `projects.mjs` / `projects.json` | registry of repos (gitignored, machine-local) |
 | `onboard.mjs` | the 8-step checklist a repo passes before the manager takes ideas |
 | `office.mjs` | reads/writes `docs/agents/office.md` inside the repo (commands, allowlist, verify level, budget) |
-| `flow.mjs` | the manager's state machine: onboard → grill → spec → tickets → implement → done |
+| `flow.mjs` | the manager's state machine: onboard → grill → spec → tickets → implement → architecture → done |
 | `runner.mjs` | one SDK session; SDK messages → scene events |
 | `permissions.mjs` | `canUseTool` per role; anything outside the allowlist asks the human |
 | `board.mjs` | `.scratch/<feature>/issues/*.md` → ticket board |
@@ -99,6 +99,18 @@ if `gh` is installed and logged in. A successful merge (or one that finds the br
 in main) moves the phase to `done`, so the next message in the chat starts a new interview;
 a feature merged by hand while the server was down is settled the same way at the next boot
 (`Flow#settleIfMerged`: every ticket done and `feature/<slug>` contained in main or deleted).
+
+**Architecture review.** Right after the level-2 report, once per feature, the flow moves to
+`architecture` and sends the manager `/improve-codebase-architecture`, scoped to what
+`feature/<slug>` changed. The report goes to `.scratch/<slug>/architecture-review.html` (not the
+OS temp dir: the manager may write only docs and `.scratch`) and shows in the docs tab in a
+sandboxed frame. The manager then grills you on the candidate you pick. From there the panel
+offers **แตกข้อที่เลือกเป็น ticket** (back to `tickets`: `/to-tickets` on the agreed candidate,
+new files numbered after the existing ones, and the feature report is owed again) or
+**ปิดงาน**. While the phase is not `implement` the pipeline hands out nothing. A second report
+does not start a second review; the **ทบทวนโครงสร้าง** button in `implement` runs it by hand, and
+`architecture-review: manual` in `docs/agents/office.md` turns the automatic start off. The
+review is a turn of the manager session, so it spends from `daily-budget-usd` like any other.
 
 `state/<project>.json` → `jobs` holds each ticket's stage, attempt, branch and cost (`usd` is
 everything the ticket ever cost across attempts and fix rounds, `usdWasted` the part spent by

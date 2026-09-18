@@ -52,6 +52,13 @@ test('grill phase sends the manager to the meeting table', () => {
   assert.equal(d.status.manager.state, 'meeting');
 });
 
+test('architecture phase brings the manager back to the meeting table for the grilling', () => {
+  const { d, crew } = setup();
+  d.handle(make('flow.phase', { phase: 'architecture', hitl: true }));
+  assert.deepEqual(crew.calls, [['seat', 'manager', MEETING_SEATS[0]]]);
+  assert.equal(d.status.manager.state, 'meeting');
+});
+
 test('agent.start puts an implementer on their own chair, QA at the TV, reviewer at their desk', () => {
   const { d, crew, places } = setup();
   d.handle(make('agent.start', { agent: 'eng_m1', ticket: '01', brief: 'x' }));

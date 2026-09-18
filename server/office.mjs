@@ -22,6 +22,7 @@ export const DEFAULTS = {
     'ticket-budget-usd': '4',   // per session
     'fix-rounds': '3',          // gate/review/verify fix loops before escalating
     'attempts': '2',            // fresh sessions per ticket before escalating
+    'architecture-review': 'auto', // auto: once per feature after its report · manual: only from the panel
   },
 };
 
@@ -54,7 +55,7 @@ export function renderOffice(o) {
   return `# Office\n\nสิ่งที่ทีม agent ต้องรู้เกี่ยวกับ repo นี้ แก้ไฟล์นี้ได้เลย server อ่านใหม่ทุกครั้งที่เริ่มงาน\n\n`
     + sec('Commands', o.commands, { dev: 'ใช้ {port} แทนพอร์ต', db: 'รันในทุก worktree ใหม่', office: 'Office Server ของ worktree สำหรับ QA รับพอร์ตทาง OFFICE_PORT' }) + '\n\n'
     + sec('Worktree', o.worktree, { 'db-per-worktree': 'none | sqlite-file | postgres-docker | shared' }) + '\n\n'
-    + sec('Policy', o.policy, { verify: 'none | scripted | exploratory', 'bash-allowlist': 'คั่นด้วย , จับคู่ตามคำขึ้นต้น' }) + '\n';
+    + sec('Policy', o.policy, { verify: 'none | scripted | exploratory', 'bash-allowlist': 'คั่นด้วย , จับคู่ตามคำขึ้นต้น', 'architecture-review': 'auto | manual' }) + '\n';
 }
 
 export function writeOffice(repo, o) {

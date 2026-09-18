@@ -50,7 +50,7 @@ export const SCHEMA = {
   'replay':           ['job'],
 };
 
-export const PHASES = ['onboard', 'grill', 'spec', 'tickets', 'implement', 'done'];
+export const PHASES = ['onboard', 'grill', 'spec', 'tickets', 'implement', 'architecture', 'done'];
 
 export const TICKET_STATUS = ['blocked', 'ready', 'in-progress', 'review', 'verify', 'done', 'needs-human'];
 

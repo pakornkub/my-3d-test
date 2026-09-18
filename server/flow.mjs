@@ -1,12 +1,19 @@
 // flow.mjs -- the manager's state machine: the upstream half of Matt Pocock's main flow.
 //
-//   onboard -> grill -> spec -> tickets -> implement -> done
+//   onboard -> grill -> spec -> tickets -> implement -> architecture -> done
+//                                  ^                          |
+//                                  +--- an agreed candidate --+
 //
 // The manager session lives across all of it (context hygiene: grill, spec and tickets
 // must share one context). The human drives the phase changes; the flow sends the slash
 // commands, because those skills are disable-model-invocation and must come from the
 // "user" side. Every finished turn in a HITL phase becomes a flow.ask so the scene shows
 // the manager waiting for the human.
+//
+// architecture is the one phase the server enters by itself: once per feature, right after
+// the feature report is written (policy `architecture-review: auto`, the default). From
+// there the human either sends an agreed candidate back to tickets -- the only backwards
+// step besides re-opening the grill -- or closes the feature.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,9 +28,11 @@ import { featureMerged } from './worktree.mjs';
 
 const PLUGIN = 'mattpocock-skills';
 const PLUGIN_VERSION = '1.2.3';
-const ORDER = ['onboard', 'grill', 'spec', 'tickets', 'implement', 'done'];
-const HITL = new Set(['grill', 'spec', 'tickets']);
-const DOC_RE = /(^|[\\/])(CONTEXT\.md|CLAUDE\.md|docs[\\/]adr[\\/].+\.md|\.scratch[\\/].+\.md)$/i;
+const ORDER = ['onboard', 'grill', 'spec', 'tickets', 'implement', 'architecture', 'done'];
+const HITL = new Set(['grill', 'spec', 'tickets', 'architecture']);
+const DOC_RE = /(^|[\\/])(CONTEXT\.md|CLAUDE\.md|docs[\\/]adr[\\/].+\.md|\.scratch[\\/].+\.(md|html))$/i;
+const DOC_MAX = 20_000;          // a markdown doc: enough to read in the panel
+const REPORT_MAX = 400_000;      // an HTML report is rendered, not read: cutting it breaks the page
 
 export class Flow {
   /**
@@ -178,7 +187,9 @@ export class Flow {
     const i = ORDER.indexOf(phase), cur = ORDER.indexOf(this.phase);
     if (i < 0) return;
     await this.ready();
-    if (i <= cur && phase !== 'grill') {
+    const loopBack = phase === 'tickets' && this.phase === 'architecture';
+    const rerun = phase === 'architecture' && this.phase === 'architecture';
+    if (i <= cur && phase !== 'grill' && !loopBack && !rerun) {
       this.emit(make('agent.say', { agent: 'manager', text: `อยู่ที่เฟส ${this.phase} แล้ว ไป ${phase} ไม่ได้` }));
       return;
     }
@@ -192,24 +203,77 @@ export class Flow {
         await this.turn(this.skill('to-spec', ''), { askKind: 'seams' });
         this.#detectFeature();
         break;
-      case 'tickets':
+      case 'tickets': {
+        const f = this.state.feature;
+        // back from the architecture review: the new tickets are the agreed candidate, and
+        // once they close the feature needs a report that covers them too
+        if (loopBack) { this.state.featureReported = false; this.save(); }
+        const args = loopBack && f
+          ? `the architecture candidate agreed in this conversation (not the spec again). เขียนต่อใน .scratch/${f}/issues/ เลขใบต่อจากใบที่มีอยู่ spec แม่สำหรับบริบท: .scratch/${f}/spec.md`
+          : (f ? `.scratch/${f}/spec.md` : '');
         this.setPhase('tickets');
-        await this.turn(this.skill('to-tickets', this.state.feature ? `.scratch/${this.state.feature}/spec.md` : ''), { askKind: 'tickets' });
+        await this.turn(this.skill('to-tickets', args), { askKind: 'tickets' });
         this.#detectFeature();
         this.refreshBoard();
         break;
+      }
       case 'implement':
         this.#detectFeature();
         this.setPhase('implement');
         this.refreshBoard();
         this.emit(make('agent.say', { agent: 'manager', text: 'บอร์ดพร้อมแล้ว ทีมจะหยิบใบที่เรืองแสงไปทำทันที' }));
         break;
+      case 'architecture': {
+        // outside implement the pipeline hands out nothing: a review started over open tickets
+        // would freeze the board until the human found their way back
+        const open = this.state.feature ? readBoard(this.repo, this.state.feature).filter((t) => t.status !== 'done') : [];
+        if (open.length) {
+          this.emit(make('agent.say', { agent: 'manager', text: `ยังมี ${open.length} ใบที่ไม่ปิด (${open.map((t) => t.id).join(', ')}) ทบทวนโครงสร้างได้เมื่อปิดครบแล้ว` }));
+          break;
+        }
+        await this.#architecture();
+        break;
+      }
       case 'done':
         this.setPhase('done');
         break;
       default:
         break;
     }
+  }
+
+  /**
+   * The pipeline wrote the feature report: the one phase change the server makes by itself.
+   * Once per feature -- the report is written again after tickets that came out of the review
+   * close, and that must not start a second review (the panel button still can). Policy
+   * `architecture-review: manual` in office.md turns the automatic start off. Returns true
+   * when the review started.
+   */
+  async onFeatureReported() {
+    const f = this.state.feature;
+    if (this.phase !== 'implement' || !f || this.state.architectureFor === f) return false;
+    const policy = readOffice(this.repo)?.policy ?? this.office?.policy ?? {};
+    if (String(policy['architecture-review'] ?? 'auto').trim().toLowerCase() !== 'auto') return false;
+    await this.ready();
+    await this.#architecture();
+    return true;
+  }
+
+  async #architecture() {
+    const f = this.state.feature;
+    if (!f) {
+      this.emit(make('agent.say', { agent: 'manager', text: 'ยังไม่มีงานให้ทบทวนโครงสร้างครับ' }));
+      return;
+    }
+    this.state.architectureFor = f;
+    this.setPhase('architecture');
+    this.emit(make('agent.say', { agent: 'manager', text: `ใบของ ${f} ปิดครบแล้ว ขอทบทวนโครงสร้างโค้ดส่วนที่เพิ่งเปลี่ยนก่อนปิดงาน` }));
+    const guide = skillDir('improve-codebase-architecture');
+    await this.turn(this.skill('improve-codebase-architecture', architectureArgs({
+      feature: f,
+      mainBranch: this.project.mainBranch ?? 'main',
+      reportGuide: guide ? path.join(guide, 'HTML-REPORT.md') : null,
+    })));
   }
 
   // ---------------------------------------------------------------- skills
@@ -237,9 +301,10 @@ export class Flow {
     if (!DOC_RE.test(abs)) return;
     const rel = path.relative(this.repo, abs).replace(/\\/g, '/');
     if (/\.scratch\/[^/]+\/issues\//.test(rel)) { this.#detectFeature(); this.refreshBoard(); return; }
+    const html = /\.html$/i.test(rel);
     let content = '';
-    try { content = fs.readFileSync(abs, 'utf8').slice(0, 20_000); } catch { /* moved */ }
-    const kind = /CONTEXT\.md$/i.test(rel) ? 'glossary' : /adr/i.test(rel) ? 'ADR' : /spec\.md$/i.test(rel) ? 'spec' : 'doc';
+    try { content = fs.readFileSync(abs, 'utf8').slice(0, html ? REPORT_MAX : DOC_MAX); } catch { /* moved */ }
+    const kind = html ? 'report' : /CONTEXT\.md$/i.test(rel) ? 'glossary' : /adr/i.test(rel) ? 'ADR' : /spec\.md$/i.test(rel) ? 'spec' : 'doc';
     this.emit(make('docs.update', { path: rel, kind, content }));
     if (kind === 'spec') { this.#detectFeature(); }
   }
@@ -297,8 +362,8 @@ export class Flow {
   async close() { this.unwatch(); this.manager?.close(); }
 }
 
-/** Find the plugin's SKILL.md on disk so a skill can be inlined when the CLI did not register it. */
-export function readSkillBody(name) {
+/** The plugin's folder for a skill (newest version on disk), or null. */
+export function skillDir(name) {
   const base = path.join(os.homedir(), '.claude', 'plugins', 'cache', 'claude-plugins-official', PLUGIN);
   if (!fs.existsSync(base)) return null;
   const versions = fs.readdirSync(base).sort().reverse();
@@ -306,14 +371,33 @@ export function readSkillBody(name) {
     const root = path.join(base, v, 'skills');
     if (!fs.existsSync(root)) continue;
     for (const group of fs.readdirSync(root)) {
-      const f = path.join(root, group, name, 'SKILL.md');
-      if (fs.existsSync(f)) {
-        const text = fs.readFileSync(f, 'utf8');
-        return text.replace(/^---[\s\S]*?---\s*/, '').trim();
-      }
+      const dir = path.join(root, group, name);
+      if (fs.existsSync(path.join(dir, 'SKILL.md'))) return dir;
     }
   }
   return null;
+}
+
+/** Find the plugin's SKILL.md on disk so a skill can be inlined when the CLI did not register it. */
+export function readSkillBody(name) {
+  const dir = skillDir(name);
+  if (!dir) return null;
+  return fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8').replace(/^---[\s\S]*?---\s*/, '').trim();
+}
+
+/**
+ * What the architecture review is told on top of the skill. The skill writes its report to
+ * the OS temp dir and opens it; here the manager may write only under docs/ and .scratch/,
+ * may not run `start`, and the scene is where the human reads it -- so the report goes into
+ * the feature's folder, where #onFile picks it up for the docs tab.
+ */
+export function architectureArgs({ feature, mainBranch = 'main', reportGuide = null }) {
+  return [
+    `Scope: what feature/${feature} changed against ${mainBranch} (git diff ${mainBranch}...feature/${feature}) — those are the hot spots; widen only if they are clean.`,
+    `Write the HTML report to .scratch/${feature}/architecture-review.html instead of the OS temp dir: the office shows that file in its docs tab. Do not try to open it (start / open / xdg-open are not allowed here).`,
+    reportGuide ? `HTML-REPORT.md, the scaffold the skill refers to, is at ${reportGuide}.` : '',
+    'Once a candidate is settled in the grilling, say so: the human turns it into tickets with the panel button.',
+  ].filter(Boolean).join('\n');
 }
 
 // ---------------------------------------------------------------- frontier questions

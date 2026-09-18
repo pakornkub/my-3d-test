@@ -35,10 +35,10 @@ export const WORK_SPOT = {
   research: 'Bookshelf',  // wayfinder research tickets
 };
 
-export const PHASES = ['onboard', 'grill', 'spec', 'tickets', 'implement', 'done'];
+export const PHASES = ['onboard', 'grill', 'spec', 'tickets', 'implement', 'architecture', 'done'];
 export const PHASE_LABEL = {
   onboard: 'ตั้งค่า', grill: 'สัมภาษณ์', spec: 'สเปก', tickets: 'แตกงาน',
-  implement: 'ลงมือ', done: 'ปิดงาน',
+  implement: 'ลงมือ', architecture: 'ทบทวนโครงสร้าง', done: 'ปิดงาน',
 };
 
 /** Agent status, as shown on the roster and the bubble colour. */

@@ -223,8 +223,11 @@ export class Pipeline {
    *   server is that an unanswered ask is a deny, never a silent allow. index.mjs always passes one.
    * @param createSession  seam for tests: (opts) => Session-shaped object.
    * @param tickMs  how often idle implementers are offered the frontier.
+   * @param onFeatureReported  () => Promise, awaited after the feature report is written: index.mjs
+   *   hands it to Flow#onFeatureReported, which may start the architecture review.
    */
-  constructor({ project, state, team, office, emit, approvals, save, manager, createSession = (o) => new Session(o), tickMs = 15_000 }) {
+  constructor({ project, state, team, office, emit, approvals, save, manager, onFeatureReported = null, createSession = (o) => new Session(o), tickMs = 15_000 }) {
+    this.onFeatureReported = onFeatureReported;
     this.project = project;
     this.state = state;
     this.team = team;
@@ -249,7 +252,8 @@ export class Pipeline {
   get commands() { return this.office?.commands ?? {}; }
 
   start() {
-    if (this.active) return;
+    // already running: the flow may have owed the report again (tickets from the architecture review)
+    if (this.active) { this.reported = !!this.state.featureReported; return; }
     this.active = true;
     this.reported = !!this.state.featureReported;   // a restart must not write the report twice
     this.#resume();
@@ -320,6 +324,8 @@ export class Pipeline {
   /** Assign frontier tickets to idle implementers, up to max-parallel. */
   tick() {
     if (!this.active || !this.feature) return;
+    // the manager is drafting or reviewing (tickets, architecture): nothing on the board is final yet
+    if (this.state.phase && this.state.phase !== 'implement') return;
     if (this.pausedUntil && this.pausedUntil > Date.now()) return;
     const tickets = this.board();
     const done = new Set(tickets.filter((t) => t.status === 'done').map((t) => t.id));
@@ -703,10 +709,13 @@ export class Pipeline {
       return;
     }
     this.state.featureReported = true; this.save();
+    const handOver = () => this.onFeatureReported?.();
     this.emit(make('feature.report', { feature: this.feature, report: report ?? '(ไม่มีรายงาน)', valid: !errs.length, diffStat: diff }));
     const pr = wt.openPullRequest(this.repo, this.feature, { mainBranch: this.project.mainBranch, title: `feature: ${this.feature}`, body: report ?? '' });
     if (pr.ok) this.emit(make('ci.status', { pr: pr.url, state: 'opened' }));
     else this.emit(make('agent.say', { agent: 'manager', text: `ไม่ได้เปิด PR: ${pr.error} รวมเข้า ${this.project.mainBranch} ได้ด้วยปุ่ม merge ในแผง` }));
+    // the flow's architecture review, once per feature: its failure is not the report's
+    try { await this.onFeatureReported?.(); } catch (e) { this.emit(make('error', { message: `architecture review: ${e.message ?? e}` })); }
   }
 
   // ---------------------------------------------------------------- helpers

@@ -195,6 +195,49 @@ test('a feature report the manager cannot write is not recorded as written', asy
   assert.ok(events.some((e) => e.type === 'feature.report'));
 });
 
+test('a written feature report hands over to the flow; a failed one does not', async () => {
+  let handed = 0;
+  const { p } = reportRig(async () => L2);
+  p.onFeatureReported = async () => { handed++; };
+  await p.maybeFeatureReport();
+  assert.equal(handed, 1);
+
+  const failed = reportRig(async () => { throw new Error('dead'); });
+  failed.p.onFeatureReported = async () => { handed++; };
+  await failed.p.maybeFeatureReport();
+  assert.equal(handed, 1);
+
+  // the review blowing up is reported as the review, and the report stays written
+  const broken = reportRig(async () => L2);
+  broken.p.onFeatureReported = async () => { throw new Error('manager gone'); };
+  await broken.p.maybeFeatureReport();
+  assert.equal(broken.state.featureReported, true);
+  assert.ok(broken.events.some((e) => e.type === 'error' && /^architecture review: manager gone/.test(e.message)));
+});
+
+test('the pipeline hands out nothing while the manager is outside implement, and owes the report again when the flow says so', async () => {
+  const { p, state } = reportRig(async () => L2);
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ube-pipe-'));
+  p.project = { ...p.project, path: repo };
+  const issues = path.join(repo, '.scratch', 'f', 'issues');
+  fs.mkdirSync(issues, { recursive: true });
+  fs.writeFileSync(path.join(issues, '03-deepen.md'), '# 03: deepen\nStatus: ready-for-agent\n');
+  p.board = Pipeline.prototype.board;
+  let ran = 0;
+  p.runTicket = () => { ran++; return new Promise(() => {}); };   // stays running: its finally would tick again
+  state.phase = 'tickets';           // the manager is still drafting the new batch
+  p.tick();
+  assert.equal(ran, 0);
+  state.phase = 'implement';
+  p.tick();
+  assert.equal(ran, 1);
+
+  p.reported = true; state.featureReported = false;   // the flow cleared it on the way back to tickets
+  p.start();                                           // already active: start() only re-reads the flag
+  assert.equal(p.reported, false);
+  clearInterval(p.timer);
+});
+
 // ---------------------------------------------------------------- gates
 test('commandsFor prefers the worktree\'s office.md slots and falls back to the project\'s', async () => {
   const { commandsFor } = await import('../server/pipeline.mjs');

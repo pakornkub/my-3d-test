@@ -86,7 +86,8 @@ async function activate(p) {
   flow = new Flow({ project: p, state: st, team, office, emit: broadcast, approvals, save: saveState });
   st.teamHash = teamHash();
   pipeline = new Pipeline({ project: p, state: st, team, office, emit: broadcast, approvals, save: saveState,
-    manager: async (text) => { await flow.turn(text, { ask: false }); return flow.manager?.lastText ?? ''; } });
+    manager: async (text) => { await flow.turn(text, { ask: false }); return flow.manager?.lastText ?? ''; },
+    onFeatureReported: () => flow.onFeatureReported() });
   broadcast(projectStatus());
   broadcast(make('flow.phase', { phase: st.phase, feature: st.feature }));
   flow.refreshBoard();

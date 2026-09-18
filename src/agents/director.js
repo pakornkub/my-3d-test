@@ -134,6 +134,11 @@ export class Director {
       case 'implement':
         if (mgr) { this.#goHomeSeat(mgr); this.#set('manager', 'idle'); this.bubbles.clear(mgr); }
         break;
+      case 'architecture':
+        // the review ends in a grilling with the human: back to the meeting table
+        if (mgr) { this.crew.sendToSeat(MEETING_SEATS[0], mgr); this.#set('manager', 'meeting'); }
+        this.#say(mgr, 'ทบทวนโครงสร้างโค้ดที่เพิ่งเปลี่ยน รายงานอยู่ในแท็บเอกสาร', { kind: 'say', ttl: 8 });
+        break;
       case 'done':
         for (const m of this.crew.members) {
           if (m.id === 'manager') { this.#goHomeSeat(m); this.#set('manager', 'idle'); continue; }
